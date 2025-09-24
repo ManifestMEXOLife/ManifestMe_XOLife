@@ -1,0 +1,9 @@
+@app.get("/videos/{goal_id}")
+def get_videos(goal_id: int):
+    return {
+        "goal_id": goal_id,
+        "videos": [
+            {"id": "vid_123", "title": "Visualization 1", "url": "https://mock.video/vid1"},
+            {"id": "vid_456", "title": "Visualization 2", "url": "https://mock.video/vid2"}
+        ]
+    }
