@@ -1,0 +1,27 @@
+manifestme-backend/
+├─ src/
+│  ├─ controllers/
+│  │  ├─ auth.controller.ts
+│  │  ├─ goals.controller.ts
+│  │  ├─ video.controller.ts
+│  ├─ routes/
+│  │  ├─ auth.routes.ts
+│  │  ├─ goals.routes.ts
+│  │  ├─ video.routes.ts
+│  ├─ services/
+│  │  ├─ video.service.ts
+│  ├─ middlewares/
+│  │  ├─ auth.middleware.ts
+│  ├─ prisma/
+│  │  └─ client.ts
+│  ├─ app.ts
+│  └─ server.ts
+├─ prisma/
+│  ├─ schema.prisma
+├─ .env.example
+├─ package.json
+├─ tsconfig.json
+├─ Dockerfile
+├─ docker-compose.yml
+├─ README.md
+└─ .github/workflows/ci-cd.yml

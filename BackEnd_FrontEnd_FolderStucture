@@ -1,0 +1,19 @@
+manifestme-backend/
+ ├── src/
+ │   ├── index.ts          # entrypoint
+ │   ├── config/
+ │   │    └── data-source.ts
+ │   ├── entities/
+ │   │    ├── User.ts
+ │   │    ├── Goal.ts
+ │   │    ├── MicroGoal.ts
+ │   │    └── JournalEntry.ts
+ │   ├── routes/
+ │   │    ├── auth.ts
+ │   │    ├── goals.ts
+ │   │    └── journal.ts
+ │   └── controllers/
+ │        ├── authController.ts
+ │        ├── goalController.ts
+ │        └── journalController.ts
+ └── .env
