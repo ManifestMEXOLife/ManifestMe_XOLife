@@ -53,8 +53,12 @@ jobs:
         run: npm run test:cjs -- --passWithNoTests --coverage
 
       - name: Upload coverage
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v3
-        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+        # If CODECOV_TOKEN is not provided in repository secrets, skip upload to avoid
+        # unauthenticated uploads and rate-limit errors. The step is conditional above.
 
   security-scan:
     name: Security Scan
