@@ -1,4 +1,3 @@
-# .github/workflows/deploy-backend.yml
 name: Deploy Backend to Elastic Beanstalk
 
 on:
@@ -43,6 +42,7 @@ jobs:
 
       - name: Deploy to Elastic Beanstalk
         run: |
-          zip -r app.zip . -x "*.git*" "node_modules/*" "dist/*"
-          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22"
-          eb deploy ${{ env.EB_ENV_NAME }}
+          zip -r app.zip . -x "*.git*" "node_modules/*" "*.git*" 
+eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22"
+eb deploy ${{ env.EB_ENV_NAME }}
+
