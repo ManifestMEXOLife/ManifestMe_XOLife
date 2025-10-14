@@ -82,7 +82,7 @@ jobs:
         if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           python -m pip install --upgrade pip
-          pip install awsebcli==3.21.14
+          pip install awsebcli
 
       - name: Configure AWS Credentials
         if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
