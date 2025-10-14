@@ -51,7 +51,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Fetch Secret (Test)
-        run: npx ts-node --files fetchSecret.ts
+        run: npx ts-node --files secrets_clean.ts
 
       - name: 'Prisma (generate & migrate status)'
         run: |
