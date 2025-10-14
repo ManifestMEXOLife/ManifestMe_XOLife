@@ -1,0 +1,52 @@
+name: Deploy Backend to Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      EB_ENV_NAME: manifestme-env
+      EB_APP_NAME: manifestme-api
+      SECRET_ARN: arn:aws:secretsmanager:us-east-1:226839593122:secret:manifestme/prod/database-qDpxwd
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npx tsc
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch Secret (Test)
+        run: npx ts-node --files fetchSecret.ts
+
+      - name: Deploy to Elastic Beanstalk (zip + eb deploy)
+        run: |
+          zip -r app.zip . -x "*.git*" "node_modules/*" "dist/*"
+          # initialize and deploy using EB CLI. If EB CLI is not installed, install it.
+          if ! command -v eb >/dev/null 2>&1; then
+            python3 -m pip install --upgrade pip
+            pip install --upgrade awsebcli
+          fi
+          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 18"
+          eb deploy ${{ env.EB_ENV_NAME }}
