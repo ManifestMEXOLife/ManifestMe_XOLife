@@ -56,10 +56,10 @@ jobs:
         run: npx tsc
 
   deploy:
-    name: Deploy to Elastic Beanstalk
+    name: Deploy to Elastic Beanstalk (manual)
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout code
