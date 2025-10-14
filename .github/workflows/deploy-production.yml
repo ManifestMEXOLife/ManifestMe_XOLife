@@ -46,8 +46,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Clean build artifacts
+        run: |
+          rm -rf dist || true
+          rm -rf coverage || true
+
+      - name: Generate Prisma client
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            npx prisma generate
+          fi
+
       - name: Run tests
-        run: npm test -- --passWithNoTests
+        run: npm run test:cjs -- --passWithNoTests
 
       - name: Security audit
         run: npm audit --audit-level=high
@@ -74,12 +85,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Generate Prisma client
-        run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
-          fi
 
       - name: Build application
         run: npm run build || npx tsc
