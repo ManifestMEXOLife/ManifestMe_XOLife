@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import prisma from "../prisma/client";
+import prisma from "./prisma/client";
 
 export const createGoal = async (req: Request, res: Response) => {
   const { userId, title, description, category } = req.body;
@@ -24,27 +24,11 @@ export const getProgress = async (req: Request, res: Response) => {
     where: { userId: Number(userId) },
     include: { microGoals: true }
   });
-  const summary = goals.map(g => {
+  const summary = goals.map((g: any) => {
     const total = g.microGoals.length;
-    const done = g.microGoals.filter(m => m.completed).length;
+    const done = g.microGoals.filter((m: any) => m.completed).length;
     return { goalId: g.id, title: g.title, total, done, progress: total ? done / total : 0 };
   });
   return res.json({ summary });
 };
 
-
-
-
-______________
-
-
-
-import { Router } from "express";
-import { createGoal, addMicroGoal, getProgress } from "../controllers/goals.controller";
-
-const router = Router();
-router.post("/", createGoal);
-router.post("/micro", addMicroGoal);
-router.get("/progress/:userId", getProgress);
-
-export default router;

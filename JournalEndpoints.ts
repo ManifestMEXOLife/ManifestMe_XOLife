@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import prisma from "../prisma/client";
+import prisma from "./prisma/client";
 
 export const createJournal = async (req: Request, res: Response) => {
   const { userId, mood, moodScore, content } = req.body;
@@ -9,11 +9,3 @@ export const createJournal = async (req: Request, res: Response) => {
   return res.json({ entry });
 };
 
-
-
-///// add the following code to JournalEndpoints.ts ///
-import { Router } from "express";
-import { createJournal } from "../controllers/journal.controller";
-const router = Router();
-router.post("/", createJournal);
-export default router;

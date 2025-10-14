@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import prisma from "../prisma/client";
+import prisma from "./prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
@@ -28,15 +28,3 @@ export const login = async (req: Request, res: Response) => {
   return res.json({ token, user: { id: user.id, email: user.email, name: user.name }});
 };
 
-
-_______________
-
-
-import { Router } from "express";
-import { register, login } from "../controllers/auth.controller";
-
-const router = Router();
-router.post("/register", register);
-router.post("/login", login);
-
-export default router;
