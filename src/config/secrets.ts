@@ -1,45 +1,62 @@
-import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
-// This module intentionally keeps runtime behaviour guarded so importing it
-// at build/CI time doesn't throw when credentials are not present. Callers
-// should use the helper functions at runtime.
+const client = new SecretsManagerClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
 
-const hasAwsCredentials = () => Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
-
-export async function getSecret(secretId: string): Promise<Record<string, any> | null> {
-  if (!hasAwsCredentials()) {
-    // In local/dev environments we don't require AWS creds. Return null so
-    // callers can handle missing secrets or fall back to local config.
-    return null;
-  }
-
-  const client = new SecretsManagerClient({
-    region: process.env.AWS_REGION || "us-east-1",
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
-    },
-  });
-
-  const command = new GetSecretValueCommand({ SecretId: secretId });
-  const response = await client.send(command);
-
-  if (!response.SecretString) return null;
-
+export async function getSecret(secretName: string): Promise<string> {
   try {
-    return JSON.parse(response.SecretString);
-  } catch {
-    return { value: response.SecretString };
+    const command = new GetSecretValueCommand({ SecretId: secretName });
+    const response = await client.send(command);
+    return response.SecretString || '';
+  } catch (error) {
+    console.error(`Failed to fetch secret "${secretName}":`, error);
+    throw error;
   }
 }
 
-export async function loadSecretToEnv(secretId: string, prefix = ""): Promise<void> {
-  const secret = await getSecret(secretId);
-  if (!secret) return;
+export async function loadSecretToEnv(secretId: string, prefix?: string): Promise<void> {
+  try {
+    const secretString = await getSecret(secretId);
+    const secret = JSON.parse(secretString);
+    
+    Object.entries(secret).forEach(([key, value]) => {
+      const envKey = prefix ? `${prefix}_${key}` : key;
+      process.env[envKey] = value as string;
+    });
+  } catch (error) {
+    console.error(`Failed to load secret to env:`, error);
+    throw error;
+  }
+}
 
-  // Flatten and load into process.env with optional prefix.
-  Object.entries(secret).forEach(([k, v]) => {
-    const key = `${prefix}${k}`.toUpperCase();
-    process.env[key] = typeof v === 'string' ? v : JSON.stringify(v);
-  });
+export async function fetchAndLoadSecretIfNeeded(): Promise<void> {
+  const hasCreds = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+  if (!hasCreds) {
+    console.log('Skipping secret fetch — AWS credentials not found');
+    return;
+  }
+
+  const secretArn: string =
+    process.env.SECRET_ARN ||
+    'arn:aws:secretsmanager:us-east-1:226839593122:secret:manifestme/prod/database-AIDATJUFRQCRNTHN3UFB2';
+
+  try {
+    await loadSecretToEnv(secretArn, 'DB');
+    console.log('Secret fetched and loaded to env');
+  } catch (err) {
+    console.error('Failed to fetch or load secret:', err);
+    throw err;
+  }
+}
+
+// If run directly, execute and surface failure via exit code.
+if (require.main === module) {
+  fetchAndLoadSecretIfNeeded()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
 }
