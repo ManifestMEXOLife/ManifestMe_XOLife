@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch: {}
 
+permissions:
+  id-token: write # allow OIDC token issuance for aws-actions/configure-aws-credentials
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   EB_ENV_NAME: manifestme-env
@@ -32,6 +36,9 @@ jobs:
         run: npm ci
 
       - name: Clean build artifacts
+        # Important: remove compiled output and coverage artifacts before running tests
+        # This prevents Jest from scanning compiled files under `dist/` (and `.d.ts`),
+        # which previously caused tests to fail in CI. We do a best-effort cleanup.
         run: |
           rm -rf dist || true
           rm -rf coverage || true
@@ -43,7 +50,9 @@ jobs:
           fi
 
       - name: Run tests
-        # run tests before any build output is created to avoid scanning compiled files
+        # Run tests before producing any build artifacts. This avoids Jest picking up
+        # compiled `.d.ts` or JS files in `dist/` which can make Jest think there
+        # are duplicate/empty test suites.
         run: npm run test:cjs -- --passWithNoTests
 
       - name: Build TypeScript
@@ -83,10 +92,31 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Configure AWS Credentials
+      - name: Check deploy credentials
+        id: creds-check
+        run: |
+          # Check for OIDC role or static AWS keys; set output for conditional steps
+          creds=false
+          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
+            creds=true
+          elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials (OIDC)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure AWS Credentials (static)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install EB CLI

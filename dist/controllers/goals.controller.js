@@ -4,10 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getGoals = exports.getProgress = exports.addMicroGoal = exports.createGoal = void 0;
-const client_1 = __importDefault(require("../prisma/client"));
+const prisma_client_1 = __importDefault(require("../prisma.client"));
 const createGoal = async (req, res) => {
     const { userId, title, description, category } = req.body;
-    const goal = await client_1.default.goal.create({
+    const goal = await prisma_client_1.default.goal.create({
         data: { userId, title, description, category }
     });
     return res.json({ goal });
@@ -15,7 +15,7 @@ const createGoal = async (req, res) => {
 exports.createGoal = createGoal;
 const addMicroGoal = async (req, res) => {
     const { goalId, title, dueDate } = req.body;
-    const mg = await client_1.default.microGoal.create({
+    const mg = await prisma_client_1.default.microGoal.create({
         data: { goalId, title, dueDate: dueDate ? new Date(dueDate) : undefined }
     });
     return res.json({ microGoal: mg });
@@ -23,7 +23,7 @@ const addMicroGoal = async (req, res) => {
 exports.addMicroGoal = addMicroGoal;
 const getProgress = async (req, res) => {
     const { userId } = req.params;
-    const goals = await client_1.default.goal.findMany({
+    const goals = await prisma_client_1.default.goal.findMany({
         where: { userId: Number(userId) },
         include: { microGoals: true }
     });
@@ -36,7 +36,7 @@ const getProgress = async (req, res) => {
 };
 exports.getProgress = getProgress;
 const getGoals = async (req, res) => {
-    const goals = await client_1.default.goal.findMany();
+    const goals = await prisma_client_1.default.goal.findMany();
     return res.json({ goals });
 };
 exports.getGoals = getGoals;

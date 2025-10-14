@@ -16,6 +16,10 @@ env:
   NODE_VERSION: '22'
   AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy-staging:
     name: Deploy to Staging
@@ -53,10 +57,30 @@ jobs:
       - name: Build application
         run: npm run build || npx tsc
 
-      - name: Configure AWS Credentials
+      - name: Check deploy credentials
+        id: creds-check
+        run: |
+          creds=false
+          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ]; then
+            creds=true
+          elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials (OIDC staging)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN_STAGING != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure AWS Credentials (static)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Python for EB CLI

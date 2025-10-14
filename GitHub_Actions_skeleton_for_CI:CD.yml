@@ -19,7 +19,17 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Check AWS credentials
+        id: creds-check
+        run: |
+          creds=false
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
       - name: Configure AWS credentials
+        if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -27,11 +37,13 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
+        if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/amazon-ecr-login@v1
       - name: Build, tag, and push image to ECR
         env:
           ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
         run: |
           IMAGE_TAG=latest
           docker build -t $ECR_REPOSITORY:$IMAGE_TAG .

@@ -4,6 +4,10 @@ on:
   push:
     branches: [ staging ]
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-deploy:
     name: Build and Deploy to Staging
@@ -41,12 +45,34 @@ jobs:
       - name: Build
         run: npx tsc
 
-      - name: Configure AWS Credentials (OIDC role or static keys)
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Check deploy credentials
+        # Determine whether an OIDC role or static AWS keys are configured.
+        # We set an output so the strong `configure-aws-credentials` action only
+        # runs when inputs are present, avoiding runtime failures at step time.
+        id: creds-check
+        run: |
+          creds=false
+          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
+            creds=true
+          elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials (OIDC)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN || '' }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
-        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+
+      - name: Configure AWS Credentials (static)
+        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
       - name: Install EB CLI
         if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}

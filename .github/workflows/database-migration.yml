@@ -61,7 +61,23 @@ jobs:
           rm -rf dist || true
           rm -rf coverage || true
 
-      - name: Configure AWS Credentials
+      - name: Check migration credentials
+        id: creds-check
+        run: |
+          creds=false
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ] || [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+              creds=true
+            fi
+          else
+            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ] || [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+              creds=true
+            fi
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials (conditional)
+        if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}

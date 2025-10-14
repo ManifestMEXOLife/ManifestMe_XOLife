@@ -31,7 +31,17 @@ jobs:
       - name: Build TypeScript
         run: npx tsc
 
-      - name: Configure AWS Credentials
+      - name: Check deploy credentials
+        id: creds-check
+        run: |
+          creds=false
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials (static)
+        if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
