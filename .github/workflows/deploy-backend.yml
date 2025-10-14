@@ -14,6 +14,7 @@ jobs:
       EB_ENV_NAME: manifestme-env
       EB_APP_NAME: manifestme-api
       SECRET_ARN: arn:aws:secretsmanager:us-east-1:226839593122:secret:manifestme/prod/database-qDpxwd
+      AWSEBCLI_VERSION: '3.21.14'
 
     steps:
       - name: Checkout code
@@ -23,6 +24,18 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '18.x'
+
+      - name: Setup Python (for EB CLI)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ env.AWSEBCLI_VERSION }}
+          restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: npm ci
@@ -40,13 +53,29 @@ jobs:
       - name: Fetch Secret (Test)
         run: npx ts-node --files fetchSecret.ts
 
-      - name: Deploy to Elastic Beanstalk (zip + eb deploy)
+      - name: 'Prisma (generate & migrate status)'
         run: |
-          zip -r app.zip . -x "*.git*" "node_modules/*" "dist/*"
-          # initialize and deploy using EB CLI. If EB CLI is not installed, install it.
-          if ! command -v eb >/dev/null 2>&1; then
-            python3 -m pip install --upgrade pip
-            pip install --upgrade awsebcli
+          if [ -f prisma/schema.prisma ]; then
+            echo 'Prisma schema found - running generate and migrate status'
+            npx prisma generate
+            npx prisma migrate status || true
+          else
+            echo 'No prisma schema found, skipping prisma steps'
+          fi
+
+      - name: Install EB CLI (pinned)
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install --upgrade awsebcli==${{ env.AWSEBCLI_VERSION }}
+
+      - name: Deploy to Elastic Beanstalk (package and eb deploy)
+        run: |
+          # package only production artifacts to reduce size
+          if [ -d dist ]; then
+            zip -r app.zip dist package.json package-lock.json -x "*.git*" "node_modules/*"
+          else
+            echo "dist/ not present — zipping package.json + source files"
+            zip -r app.zip package.json package-lock.json -x "*.git*" "node_modules/*"
           fi
           eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 18"
           eb deploy ${{ env.EB_ENV_NAME }}
