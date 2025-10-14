@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+console.log("\n--- ENV VARIABLES");
 // testSecret.ts
 const secrets_1 = require("./src/config/secrets");
 async function main() {
