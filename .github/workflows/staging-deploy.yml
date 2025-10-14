@@ -36,17 +36,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
+      - name: Clean build artifacts
+        run: |
+          rm -rf dist || true
+          rm -rf coverage || true
+
+      - name: Generate Prisma client (if schema exists)
         run: |
           if [ -f prisma/schema.prisma ]; then
             npx prisma generate
           fi
 
+      - name: Run tests
+        run: npm run test:cjs -- --passWithNoTests
+
       - name: Build application
         run: npm run build || npx tsc
-
-      - name: Run tests
-        run: npm test -- --passWithNoTests
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
