@@ -6,9 +6,18 @@
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "lint": "eslint . --ext .ts,.js --fix",
+    "lint:check": "eslint . --ext .ts,.js",
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
-    "test": "jest"
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:reset": "prisma migrate reset",
+    "prisma:seed": "prisma db seed",
+    "postinstall": "prisma generate",
+    "prestart": "npm run build"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.908.0",

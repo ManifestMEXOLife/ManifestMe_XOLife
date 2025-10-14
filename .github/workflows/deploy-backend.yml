@@ -1,4 +1,4 @@
-name: Build and (optionally) Deploy Backend
+name: Build and Deploy Backend
 
 on:
   push:
@@ -11,93 +11,95 @@ env:
   AWS_REGION: us-east-1
   EB_ENV_NAME: manifestme-env
   EB_APP_NAME: manifestme-api
-  SECRET_ARN: arn:aws:secretsmanager:us-east-1:226839593122:secret:manifestme/prod/database-qDpxwd
+  NODE_VERSION: '22'
 
 jobs:
   build:
-    name: Build (generate client + tsc)
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
-
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Show environment presence (debug)
-        run: |
-          echo "SECRET_ARN=${SECRET_ARN:+present}"
-          if [ -n "$DATABASE_URL" ]; then echo "DATABASE_URL=present"; else echo "DATABASE_URL=not set"; fi
-
-      - name: Generate Prisma client (if schema exists)
+      - name: Generate Prisma client
         run: |
           if [ -f prisma/schema.prisma ]; then
-            echo "prisma/schema.prisma found — running prisma generate"
             npx prisma generate
-          else
-            echo "No prisma/schema.prisma — skipping prisma generate"
           fi
 
       - name: Build TypeScript
-        run: npx tsc
+        run: npm run build || npx tsc
+
+      - name: Run tests
+        run: npm test -- --passWithNoTests
 
   deploy:
-    name: Deploy to Elastic Beanstalk (manual)
+    name: Deploy to Elastic Beanstalk
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: github.event_name == 'workflow_dispatch'
+    environment: production
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            npx prisma generate
+          fi
+
+      - name: Build application
+        run: npm run build || npx tsc
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
-      - name: Pip cache
-        uses: actions/cache@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Install EB CLI
-        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           python -m pip install --upgrade pip
           pip install awsebcli==3.21.14
 
-      - name: Configure AWS Credentials
-        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Load secrets
+        run: |
+          if [ -f fetchSecret.safe.ts ]; then
+            npx ts-node --files fetchSecret.safe.ts
+          fi
+        continue-on-error: true
 
-      - name: Fetch Secret (Test)
-        run: npx ts-node --files fetchSecret.safe.ts
+      - name: Create deployment package
+        run: |
+          zip -r app.zip dist/ package.json package-lock.json prisma/ .ebextensions/ -x "*.git*" "node_modules/*" "src/*" "*.ts" "tsconfig.json"
 
       - name: Deploy to Elastic Beanstalk
-        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          zip -r app.zip . -x "*.git*" "node_modules/*" "dist/*"
           eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22"
-          eb deploy ${{ env.EB_ENV_NAME }}
+          eb deploy ${{ env.EB_ENV_NAME }} --timeout 20

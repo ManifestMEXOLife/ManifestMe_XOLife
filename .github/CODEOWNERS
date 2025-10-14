@@ -1,0 +1,18 @@
+# Global code owners
+* @dinakoes
+
+# Backend specific
+/controllers/ @dinakoes
+/routes/ @dinakoes
+/prisma/ @dinakoes
+*.ts @dinakoes
+
+# Infrastructure and deployment
+/.github/ @dinakoes
+/docker-compose.yml @dinakoes
+/.ebextensions/ @dinakoes
+
+# Configuration files
+package.json @dinakoes
+tsconfig.json @dinakoes
+.env.example @dinakoes

@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import prisma from "../prisma/client";
+import prisma from "../prisma.client";
 
 export const requestMockVideo = async (req: Request, res: Response) => {
   const { goalId, prompt } = req.body;

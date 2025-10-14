@@ -1,0 +1,106 @@
+name: Build and (optionally) Deploy Backend
+ Check failure on line 1 in .github/workflows/deploy-backend.yml
+
+
+GitHub Actions
+/ .github/workflows/deploy-backend.yml
+Invalid workflow file
+
+(Line: 82, Col: 13): Unrecognized named-value: 'secrets'. Located at position 1 within expression: secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY, (Line: 88, Col: 13): Unrecognized named-value: 'secrets'. Located at position 1 within expression: secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY, (Line: 99, Col: 13): Unrecognized named-value: 'secrets'. Located at position 1 within expression: secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: us-east-1
+  EB_ENV_NAME: manifestme-env
+  EB_APP_NAME: manifestme-api
+  SECRET_ARN: arn:aws:secretsmanager:us-east-1:226839593122:secret:manifestme/prod/database-qDpxwd
+
+jobs:
+  build:
+    name: Build (generate client + tsc)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Show environment presence (debug)
+        run: |
+          echo "SECRET_ARN=${SECRET_ARN:+present}"
+          if [ -n "$DATABASE_URL" ]; then echo "DATABASE_URL=present"; else echo "DATABASE_URL=not set"; fi
+      - name: Generate Prisma client (if schema exists)
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            echo "prisma/schema.prisma found — running prisma generate"
+            npx prisma generate
+          else
+            echo "No prisma/schema.prisma — skipping prisma generate"
+          fi
+      - name: Build TypeScript
+        run: npx tsc
+
+  deploy:
+    name: Deploy to Elastic Beanstalk (manual)
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install EB CLI
+        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install awsebcli
+      - name: Configure AWS Credentials
+        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch Secret (Test)
+        run: npx ts-node --files fetchSecret.safe.ts
+
+      - name: Deploy to Elastic Beanstalk
+        if: ${{ secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          zip -r app.zip . -x "*.git*" "node_modules/*" "dist/*"
+          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22"
+          eb deploy ${{ env.EB_ENV_NAME }}

@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import prisma from "../prisma/client";
+import prisma from "../prisma.client";
 
 export const createGoal = async (req: Request, res: Response) => {
   const { userId, title, description, category } = req.body;

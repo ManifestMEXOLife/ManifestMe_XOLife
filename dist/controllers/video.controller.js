@@ -17,7 +17,7 @@ const requestMockVideo = async (req, res) => {
 exports.requestMockVideo = requestMockVideo;
 const listVideosForGoal = async (req, res) => {
     const { goalId } = req.params;
-    const videos = await client_1.default.video.findMany({ where: { goalId: Number(goalId) } });
+    const videos = await client_1.default.video.findMany({ where: { goal: { id: Number(goalId) } } });
     return res.json({ videos });
 };
 exports.listVideosForGoal = listVideosForGoal;

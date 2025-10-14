@@ -1,1 +1,1 @@
-{"version":3,"file":"JournalEndpoints.d.ts","sourceRoot":"","sources":["../JournalEndpoints.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAE,QAAQ,EAAE,MAAM,SAAS,CAAC;AAG5C,eAAO,MAAM,aAAa,GAAU,KAAK,OAAO,EAAE,KAAK,QAAQ,gDAM9D,CAAC;AAOF,QAAA,MAAM,MAAM,4CAAW,CAAC;AAExB,eAAe,MAAM,CAAC"}
+{"version":3,"file":"JournalEndpoints.d.ts","sourceRoot":"","sources":["../JournalEndpoints.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAE,QAAQ,EAAE,MAAM,SAAS,CAAC;AAG5C,eAAO,MAAM,aAAa,GAAU,KAAK,OAAO,EAAE,KAAK,QAAQ,gDAM9D,CAAC"}

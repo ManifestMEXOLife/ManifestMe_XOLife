@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProgress = exports.addMicroGoal = exports.createGoal = void 0;
-const client_1 = __importDefault(require("../prisma/client"));
+const client_1 = __importDefault(require("./prisma/client"));
 const createGoal = async (req, res) => {
     const { userId, title, description, category } = req.body;
     const goal = await client_1.default.goal.create({
@@ -28,20 +28,12 @@ const getProgress = async (req, res) => {
         where: { userId: Number(userId) },
         include: { microGoals: true }
     });
-    const summary = goals.map(g => {
+    const summary = goals.map((g) => {
         const total = g.microGoals.length;
-        const done = g.microGoals.filter(m => m.completed).length;
+        const done = g.microGoals.filter((m) => m.completed).length;
         return { goalId: g.id, title: g.title, total, done, progress: total ? done / total : 0 };
     });
     return res.json({ summary });
 };
 exports.getProgress = getProgress;
-______________;
-const express_1 = require("express");
-const goals_controller_1 = require("../controllers/goals.controller");
-const router = (0, express_1.Router)();
-router.post("/", exports.createGoal);
-router.post("/micro", exports.addMicroGoal);
-router.get("/progress/:userId", exports.getProgress);
-exports.default = router;
 //# sourceMappingURL=GoalsController.js.map

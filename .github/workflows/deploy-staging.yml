@@ -1,0 +1,87 @@
+name: Staging Deploy (Elastic Beanstalk)
+
+on:
+  push:
+    branches: [ staging ]
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client (if schema exists)
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            npx prisma generate
+          else
+            echo "No prisma/schema.prisma found — skipping generate"
+          fi
+
+      - name: Build
+        run: npx tsc
+
+      - name: Run unit tests
+        run: npm test -- --passWithNoTests
+
+      - name: Configure AWS Credentials (OIDC role or static keys)
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN || '' }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+
+      - name: Install EB CLI
+        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install awsebcli==3.21.14
+
+      - name: Package and Deploy to Staging
+        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        run: |
+          if [ -d dist ]; then
+            zip -r app.zip dist package.json package-lock.json -x "*.git*" "node_modules/*"
+          else
+            zip -r app.zip package.json package-lock.json -x "*.git*" "node_modules/*"
+          fi
+          eb init ${{ secrets.EB_APP_NAME || 'manifestme-api' }} --region ${{ secrets.AWS_REGION || 'us-east-1' }} --platform "Node.js 22"
+          eb deploy ${{ secrets.EB_ENV_NAME || 'manifestme-staging' }}
+
+      - name: Install AWS CLI (for describing environment)
+        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install awscli
+
+      - name: Describe EB environment and run smoke test
+        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        env:
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME || 'manifestme-staging' }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          DO_AUTH_CHECK: ${{ secrets.SMOKE_TEST_EMAIL && '1' || '' }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -e
+          echo "Describing environment: $EB_ENV_NAME"
+          CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --region "$AWS_REGION" --query 'Environments[0].CNAME' --output text)
+          if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
+            echo "Could not determine environment CNAME for $EB_ENV_NAME"
+            exit 1
+          fi
+          URL="https://$CNAME"
+          echo "Environment URL: $URL"
+          TARGET_URL="$URL" node ./scripts/post_deploy_smoke.js
