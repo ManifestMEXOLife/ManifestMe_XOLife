@@ -40,8 +40,17 @@ jobs:
       - name: Build TypeScript
         run: npm run build || npx tsc
 
+      - name: Clean build artifacts
+        run: |
+          rm -rf dist || true
+          rm -rf coverage || true
+
+      - name: Build TypeScript
+        run: npm run build || npx tsc
+
       - name: Run tests
-        run: npm test -- --passWithNoTests
+        # use the explicit test:cjs script to avoid duplicate --config when CI appends args
+        run: npm run test:cjs -- --passWithNoTests
 
   deploy:
     name: Deploy to Elastic Beanstalk
@@ -94,6 +103,9 @@ jobs:
             npx ts-node --files fetchSecret.safe.ts
           fi
         continue-on-error: true
+
+      - name: Clean coverage
+        run: rm -rf coverage || true
 
       - name: Create deployment package
         run: |
