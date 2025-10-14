@@ -1,8 +1,14 @@
-// Minimal Prisma client stub for CI/type-checking
-// This file is intentionally minimal: it provides a default `prisma` export
-// so other modules can import it during type-checking and CI. Replace with
-// the real Prisma client (`new PrismaClient()`) in production/runtime.
+// Standard Prisma client singleton pattern. This avoids creating multiple
+// instances when using hot-reload (e.g., nodemon/ts-node-dev) in development.
+import { PrismaClient } from '@prisma/client';
 
-const prisma: any = {};
+declare global {
+	// eslint-disable-next-line no-var
+	var prisma: PrismaClient | undefined;
+}
+
+const prisma = global.prisma || new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') global.prisma = prisma;
 
 export default prisma;
