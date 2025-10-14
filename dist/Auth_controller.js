@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.login = exports.register = void 0;
-const client_1 = __importDefault(require("../prisma/client"));
+const client_1 = __importDefault(require("./prisma/client"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -33,11 +33,4 @@ const login = async (req, res) => {
     return res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
 };
 exports.login = login;
-_______________;
-const express_1 = require("express");
-const auth_controller_1 = require("../controllers/auth.controller");
-const router = (0, express_1.Router)();
-router.post("/register", exports.register);
-router.post("/login", exports.login);
-exports.default = router;
 //# sourceMappingURL=Auth_controller.js.map
