@@ -1,11 +1,15 @@
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
-const client = new SecretsManagerClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
+const creds = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+  ? {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  }
+  : undefined;
+
+const client = new SecretsManagerClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: creds,
 });
 
 export async function getSecret(secretName: string): Promise<string> {
@@ -23,7 +27,7 @@ export async function loadSecretToEnv(secretId: string, prefix?: string): Promis
   try {
     const secretString = await getSecret(secretId);
     const secret = JSON.parse(secretString);
-    
+
     Object.entries(secret).forEach(([key, value]) => {
       const envKey = prefix ? `${prefix}_${key}` : key;
       process.env[envKey] = value as string;
@@ -37,7 +41,7 @@ export async function loadSecretToEnv(secretId: string, prefix?: string): Promis
 export async function fetchAndLoadSecretIfNeeded(): Promise<void> {
   const hasCreds = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
   if (!hasCreds) {
-    console.log('Skipping secret fetch — AWS credentials not found');
+    console.warn('Skipping secret fetch — AWS credentials not found');
     return;
   }
 
