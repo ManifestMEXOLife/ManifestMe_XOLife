@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: {}
 
 env:
   AWS_REGION: us-east-1
@@ -37,8 +38,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
-        run: npx prisma generate
+      - name: Show environment presence (debug)
+        run: |
+          echo "SECRET_ARN=${SECRET_ARN:+present}"
+          if [ -n "$DATABASE_URL" ]; then echo "DATABASE_URL=present"; else echo "DATABASE_URL=not set"; fi
+
+      - name: Generate Prisma client (if schema exists)
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            echo "prisma/schema.prisma found — running prisma generate"
+            npx prisma generate
+          else
+            echo "No prisma/schema.prisma — skipping prisma generate"
+          fi
 
       - name: Build TypeScript
         run: npx tsc
