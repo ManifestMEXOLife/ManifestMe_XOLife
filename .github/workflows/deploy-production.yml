@@ -47,8 +47,7 @@ jobs:
         run: npm ci
 
       - name: Clean build artifacts
-        run: |
-          rm -rf dist coverage || true
+        run: rm -rf dist coverage || true
 
       - name: Generate Prisma client
         run: |
@@ -132,6 +131,13 @@ jobs:
           for i in $(seq 1 $MAX_RETRIES); do
             STATUS=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
             echo "Attempt $i: Environment health status = $STATUS"
+            
+            # Tail last 20 lines of logs if not green
+            if [ "$STATUS" != "Green" ]; then
+              echo "Tailing last 20 lines of EB logs for debugging..."
+              eb logs $ENV_NAME --all --num 20 || true
+            fi
+
             if [ "$STATUS" = "Green" ]; then
               SUCCESS=1
               break
