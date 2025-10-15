@@ -42,10 +42,9 @@ jobs:
 
       - name: Clean build artifacts
         run: |
-          rm -rf dist || true
-          rm -rf coverage || true
+          rm -rf dist coverage || true
 
-      - name: Generate Prisma client (if schema exists)
+      - name: Generate Prisma client
         run: |
           if [ -f prisma/schema.prisma ]; then
             npx prisma generate
@@ -69,19 +68,21 @@ jobs:
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials (OIDC staging)
-        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN_STAGING != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}
-          aws-region: ${{ env.AWS_REGION }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
+        run: |
+          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ]; then
+            echo "Configuring AWS credentials via OIDC..."
+            gh run prepare-oidc
+            aws-actions/configure-aws-credentials@v4 --role-to-assume ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }} --aws-region ${{ env.AWS_REGION }}
+          fi
 
       - name: Configure AWS Credentials (static)
-        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "Configuring AWS credentials via static keys..."
+            aws-actions/configure-aws-credentials@v4 --aws-access-key-id ${{ secrets.AWS_ACCESS_KEY_ID }} --aws-secret-access-key ${{ secrets.AWS_SECRET_ACCESS_KEY }} --aws-region ${{ env.AWS_REGION }}
+          fi
 
       - name: Setup Python for EB CLI
         uses: actions/setup-python@v4
@@ -98,7 +99,7 @@ jobs:
 
       - name: Comment PR with staging URL
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             github.rest.issues.createComment({
