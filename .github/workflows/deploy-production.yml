@@ -125,14 +125,14 @@ jobs:
           ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
           echo "Checking Elastic Beanstalk environment health for $ENV_NAME..."
           
-          MAX_RETRIES=30
-          SLEEP=10
+          MAX_RETRIES=40
+          SLEEP=15
           SUCCESS=0
           
           for i in $(seq 1 $MAX_RETRIES); do
-            HEALTH=$(eb health $ENV_NAME | grep 'Status' | awk '{print $2}')
-            echo "Attempt $i: Environment health status = $HEALTH"
-            if [ "$HEALTH" = "Green" ]; then
+            STATUS=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
+            echo "Attempt $i: Environment health status = $STATUS"
+            if [ "$STATUS" = "Green" ]; then
               SUCCESS=1
               break
             fi
