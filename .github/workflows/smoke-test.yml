@@ -1,34 +1,74 @@
-name: Manual Smoke Test
+name: Post-Deploy Smoke Test
 
 on:
   workflow_dispatch:
     inputs:
-      target_url:
-        description: 'Target URL to run smoke test against (e.g. https://example.com)'
+      environment:
+        description: 'Environment to run smoke test against'
         required: true
-        type: string
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  EB_APP_NAME: 'manifestme-api'
+  STAGING_ENV: 'manifestme-staging'
+  PRODUCTION_ENV: 'manifestme-env'
 
 jobs:
   smoke:
-    name: Run post-deploy smoke test
+    name: Run Post-Deploy Smoke Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
+
+      - name: Configure AWS Credentials (static)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine environment URL
+        id: env-url
+        run: |
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            EB_ENV_NAME=${{ env.STAGING_ENV }}
+          else
+            EB_ENV_NAME=${{ env.PRODUCTION_ENV }}
+          fi
+          echo "Fetching CNAME for environment: $EB_ENV_NAME"
+          CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
+          if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
+            echo "Could not fetch CNAME for $EB_ENV_NAME"
+            exit 1
+          fi
+          echo "Environment URL: https://$CNAME"
+          echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
 
       - name: Run smoke script
         env:
-          TARGET_URL: ${{ inputs.target_url }}
+          TARGET_URL: ${{ env.TARGET_URL }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
+          echo "Running smoke test against $TARGET_URL"
           node scripts/post_deploy_smoke.js
