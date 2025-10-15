@@ -58,10 +58,9 @@ jobs:
 
       - name: Clean build artifacts
         run: |
-          rm -rf dist || true
-          rm -rf coverage || true
+          rm -rf dist coverage || true
 
-      - name: Check migration credentials
+      - name: Determine AWS Credentials
         id: creds-check
         run: |
           creds=false
@@ -76,12 +75,14 @@ jobs:
           fi
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Credentials (conditional)
+      - name: Configure AWS Credentials
         if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
+          aws-access-key-id: ${{ inputs.environment == 'production' && secrets.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ inputs.environment == 'production' && secrets.AWS_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Load database secrets
         run: |
