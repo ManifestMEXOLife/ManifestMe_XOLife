@@ -94,43 +94,47 @@ jobs:
         run: npm run build || npx tsc
 
       - name: Check deploy credentials
-        # Guard step: prefer OIDC role when available, fall back to static keys.
-        # This prevents configure-aws-credentials from running with empty inputs
-        # (which previously caused the job to fail). Outputs `credentials_present`.
         id: creds-check
         run: |
           creds=false
+          ROLE=""
+          ACCESS=""
           ENV="${{ inputs.environment }}"
+
           if [ "$ENV" = "production" ]; then
-            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ] || [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
               creds=true
+              ROLE="${{ secrets.AWS_OIDC_ROLE_ARN }}"
+            elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+              creds=true
+              ACCESS="${{ secrets.AWS_ACCESS_KEY_ID }}"
             fi
           else
-            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ] || [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ]; then
               creds=true
+              ROLE="${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}"
+            elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+              creds=true
+              ACCESS="${{ secrets.AWS_ACCESS_KEY_ID }}"
             fi
           fi
+
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+          echo "role=$ROLE" >> $GITHUB_OUTPUT
+          echo "access=$ACCESS" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials (OIDC)
-        if: steps.creds-check.outputs.credentials_present == 'true' && inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN != ''
+        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && steps.creds-check.outputs.role != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Configure AWS Credentials (OIDC - staging)
-        if: steps.creds-check.outputs.credentials_present == 'true' && inputs.environment == 'staging' && secrets.AWS_OIDC_ROLE_ARN_STAGING != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}
+          role-to-assume: ${{ steps.creds-check.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS Credentials (static)
-        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
+        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && steps.creds-check.outputs.access != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ steps.creds-check.outputs.access }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-${{ github.run_id }}
