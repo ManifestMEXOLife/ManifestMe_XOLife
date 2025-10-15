@@ -33,73 +33,46 @@ permissions:
 
 jobs:
   pre-deploy-checks:
-    name: Pre-deployment Checks
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip_tests }}
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Clean build artifacts
-        run: |
-          rm -rf dist coverage || true
-
-      - name: Generate Prisma client
-        run: |
+      - run: npm ci
+      - run: rm -rf dist coverage || true
+      - run: |
           if [ -f prisma/schema.prisma ]; then
             npx prisma generate
           fi
-
-      - name: Run tests
-        run: npm run test:cjs -- --passWithNoTests
-
-      - name: Security audit
-        run: npm audit --audit-level=high
+      - run: npm run test:cjs -- --passWithNoTests
+      - run: npm audit --audit-level=high
 
   build-and-deploy:
-    name: Build & Deploy to ${{ inputs.environment || 'Production' }}
     runs-on: ubuntu-latest
     needs: pre-deploy-checks
     if: always() && (needs.pre-deploy-checks.result == 'success' || inputs.skip_tests)
     environment: ${{ inputs.environment || 'production' }}
-    
     outputs:
       deployment-url: ${{ steps.deploy.outputs.environment-url }}
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+      - run: npm ci
+      - run: npm run build
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application
-        run: npm run build || npx tsc
-
-      - name: Check deploy credentials
-        id: creds-check
+      # ✅ Credential check & capture
+      - id: creds-check
         run: |
           creds=false
           ROLE=""
           ACCESS=""
           ENV="${{ inputs.environment }}"
-          
           if [ "$ENV" = "production" ]; then
             if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
               creds=true
@@ -117,76 +90,61 @@ jobs:
               ACCESS="${{ secrets.AWS_ACCESS_KEY_ID }}"
             fi
           fi
-          
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
           echo "role=$ROLE" >> $GITHUB_OUTPUT
           echo "access=$ACCESS" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Credentials (OIDC)
+      # Configure AWS credentials
+      - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ steps.creds-check.outputs.credentials_present == 'true' && steps.creds-check.outputs.role != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ steps.creds-check.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Configure AWS Credentials (static)
+      - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ steps.creds-check.outputs.credentials_present == 'true' && steps.creds-check.outputs.access != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ steps.creds-check.outputs.access }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-${{ github.run_id }}
 
-      - name: Load secrets from AWS
-        run: |
+      - run: |
           if [ -f fetchSecret.safe.ts ]; then
             npx ts-node --files fetchSecret.safe.ts
           fi
         continue-on-error: true
 
-      - name: Setup Python for EB CLI
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'false'
+      - run: pip install awsebcli==3.21.14
 
-      - name: Install EB CLI
-        run: pip install awsebcli==3.21.14
-
-      - name: Create deployment package
-        run: |
+      - run: |
           if [ -d dist ]; then
             zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ .ebextensions/ -x "*.git*" "node_modules/*" "*.log"
           else
             zip -r app-${{ github.sha }}.zip . -x "*.git*" "node_modules/*" "*.log" "dist/*" "src/*" "*.ts" "tsconfig.json"
           fi
 
-      - name: Deploy to Elastic Beanstalk
-        id: deploy
+      - id: deploy
         run: |
           eb init ${{ secrets.EB_APP_NAME || 'manifestme-api' }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
           eb deploy ${{ secrets.EB_ENV_NAME || 'manifestme-env' }} --staged --timeout 20
           echo "environment-url=$(eb status | grep CNAME | awk '{print $2}')" >> $GITHUB_OUTPUT
 
-      - name: Run health check
-        run: |
+      - run: |
           sleep 30
           curl -f ${{ steps.deploy.outputs.environment-url }}/health || exit 1
 
   notify:
-    name: Notify Deployment Status
     runs-on: ubuntu-latest
     needs: build-and-deploy
     if: always()
-    
     steps:
-      - name: Notify success
-        if: needs.build-and-deploy.result == 'success'
-        run: echo "✅ Deployment successful to ${{ needs.build-and-deploy.outputs.deployment-url }}"
-          
-      - name: Notify failure
-        if: needs.build-and-deploy.result == 'failure'
-        run: |
-          echo "❌ Deployment failed"
-          exit 1
+      - run: |
+          if [[ "${{ needs.build-and-deploy.result }}" == "success" ]]; then
+            echo "✅ Deployment successful to ${{ needs.build-and-deploy.outputs.deployment-url }}"
+          else
+            echo "❌ Deployment failed"
+            exit 1
