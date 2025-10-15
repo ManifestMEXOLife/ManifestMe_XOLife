@@ -1,4 +1,4 @@
-name: Production Deploy
+name: Build & Deploy
 
 on:
   push:
@@ -25,7 +25,6 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  AWS_REGION: ${{ secrets.AWS_REGION }}
 
 permissions:
   id-token: write
@@ -66,11 +65,11 @@ jobs:
         run: npm audit --audit-level=high
 
   build-and-deploy:
-    name: Build & Deploy to ${{ inputs.environment || 'production' }}
+    name: Build & Deploy to ${{ inputs.environment }}
     runs-on: ubuntu-latest
     needs: pre-deploy-checks
     if: always() && (needs.pre-deploy-checks.result == 'success' || inputs.skip_tests)
-    environment: ${{ inputs.environment || 'production' }}
+    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,7 +80,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
       - name: Build application
@@ -102,14 +101,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Deploy to Elastic Beanstalk
         run: |
-          eb init ${{ secrets.EB_APP_NAME || 'manifestme-api' }} \
-            --region ${{ env.AWS_REGION }} \
-            --platform "Node.js 22 running on 64bit Amazon Linux 2023"
-          eb deploy ${{ secrets.EB_ENV_NAME || 'manifestme-env' }} --staged --timeout 20
+          EB_APP=${{ secrets.EB_APP_NAME || 'manifestme-api' }}
+          EB_ENV=$([[ "${{ inputs.environment }}" == "staging" ]] && echo ${{ secrets.EB_ENV_NAME_STAGING }} || echo ${{ secrets.EB_ENV_NAME }})
+          eb init $EB_APP --region ${{ secrets.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
+          eb deploy $EB_ENV --staged --timeout 20
           echo "Deployed to $(eb status | grep CNAME | awk '{print $2}')"
 
       - name: Run health check
