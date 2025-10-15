@@ -1,16 +1,14 @@
 import dotenv from "dotenv";
-dotenv.config();
+import http from "http";
 import app from "./app";
 
-const port = (() => {
-  const envPort = process.env.PORT;
-  if (envPort) {
-    const parsed = Number(envPort);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return 8080;
-})();
+dotenv.config();
 
-app.listen(port as number, () => {
-  console.log(`Server running on port ${port}`);
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+
+// Create a server explicitly — this avoids TS overload confusion
+const server = http.createServer(app);
+
+server.listen(port, () => {
+  console.log(`✅ Server running on port ${port}`);
 });
