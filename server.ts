@@ -2,8 +2,15 @@ import dotenv from "dotenv";
 dotenv.config();
 import app from "./app";
 
-const port: number = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const port = (() => {
+  const envPort = process.env.PORT;
+  if (envPort) {
+    const parsed = Number(envPort);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return 8080;
+})();
 
-app.listen(port, () => {
+app.listen(port as number, () => {
   console.log(`Server running on port ${port}`);
 });
