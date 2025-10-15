@@ -1,14 +1,13 @@
-import dotenv from "dotenv";
-import http from "http";
-import app from "./app";
+const express = require('express');
+const app = express();
 
-dotenv.config();
+// Use Elastic Beanstalk's PORT environment variable or default to 8080
+const PORT = process.env.PORT || 8080;
 
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+app.get('/', (req, res) => {
+  res.send('Server is running!');
+});
 
-// Create a server explicitly — this avoids TS overload confusion
-const server = http.createServer(app);
-
-server.listen(port, () => {
-  console.log(`✅ Server running on port ${port}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server listening on port ${PORT}`);
 });
