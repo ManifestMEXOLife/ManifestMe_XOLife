@@ -1,93 +1,30 @@
-name: Cleanup Resources
+- name: Delete old artifacts
+  uses: actions/github-script@v8
+  with:
+    script: |
+      const { github, context } = require('@actions/github');
+      const perPage = 100;
+      let page = 1;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
 
-# Schedule: Weekly on Sunday at 00:00 UTC (midnight UTC)
-# Adjust local timezone accordingly. For example, 00:00 UTC = 6:00 PM previous day PDT
-on:
-  schedule:
-    - cron: '0 0 * * 0' # Sunday at 00:00 UTC
-  workflow_dispatch: {}
-
-jobs:
-  cleanup-artifacts:
-    name: Cleanup Old Artifacts
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Delete old artifacts
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const perPage = 100;
-            let page = 1;
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - 30); // Keep artifacts for 30 days
-            
-            while (true) {
-              const artifacts = await github.rest.actions.listArtifactsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: perPage,
-                page: page
-              });
-              
-              if (artifacts.data.artifacts.length === 0) break;
-              
-              for (const artifact of artifacts.data.artifacts) {
-                if (new Date(artifact.created_at) < cutoff) {
-                  try {
-                    await github.rest.actions.deleteArtifact({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      artifact_id: artifact.id
-                    });
-                    console.log(`Deleted artifact: ${artifact.name}`);
-                  } catch (err) {
-                    console.error(`Failed to delete artifact ${artifact.name}:`, err);
-                  }
-                }
-              }
-              
-              page++;
-            }
-
-  cleanup-caches:
-    name: Cleanup Old Caches
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Cleanup caches
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const perPage = 100;
-            let page = 1;
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - 7); // Keep caches for 7 days
-            
-            while (true) {
-              const caches = await github.rest.actions.listCachesForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: perPage,
-                page: page
-              }).catch(err => { console.error(err); return { data: { actions_caches: [] } }; });
-              
-              if (!caches.data.actions_caches || caches.data.actions_caches.length === 0) break;
-              
-              for (const cache of caches.data.actions_caches) {
-                if (new Date(cache.created_at) < cutoff) {
-                  try {
-                    await github.rest.actions.deleteActionsCacheById({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      cache_id: cache.id
-                    });
-                    console.log(`Deleted cache: ${cache.key}`);
-                  } catch (err) {
-                    console.error(`Failed to delete cache ${cache.key}:`, err);
-                  }
-                }
-              }
-              
-              page++;
-            }
+      while (true) {
+        const artifacts = await github.rest.actions.listArtifactsForRepo({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          per_page: perPage,
+          page
+        });
+        if (artifacts.data.artifacts.length === 0) break;
+        for (const artifact of artifacts.data.artifacts) {
+          if (new Date(artifact.created_at) < cutoff) {
+            await github.rest.actions.deleteArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id
+            });
+            console.log(`Deleted artifact: ${artifact.name}`);
+          }
+        }
+        page++;
+      }
