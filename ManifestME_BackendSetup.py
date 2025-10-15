@@ -1,11 +1,11 @@
 # Databricks notebook source
-npx create-expo-app manifestme
-cd manifestme
-npm install @react-navigation/native react-native-paper @react-native-async-storage/async-storage
+# (Expo/React Native setup commands are for reference; do not run in Python)
+# npx create-expo-app manifestme
+# cd manifestme
+# npm install @react-navigation/native react-native-paper @react-native-async-storage/async-storage
 
-# COMMAND ----------
-
-pip install fastapi uvicorn pydantic
+# (Python backend setup commands for reference)
+# pip install fastapi uvicorn pydantic
 
 # COMMAND ----------
 
