@@ -1,4 +1,4 @@
-name: Production Deploy
+name: Build & Deploy
 
 on:
   push:
@@ -67,11 +67,11 @@ jobs:
         run: npm audit --audit-level=high
 
   build-and-deploy:
-    name: Build & Deploy to ${{ inputs.environment || 'production' }}
+    name: Build & Deploy to ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    needs: [pre-deploy-checks]
+    needs: pre-deploy-checks
     if: always() && (needs.pre-deploy-checks.result == 'success' || inputs.skip_tests)
-    environment: ${{ inputs.environment || 'production' }}
+    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,10 +93,9 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
-          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING || '' }}
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_OIDC_ROLE_ARN || inputs.environment == 'staging' && secrets.AWS_OIDC_ROLE_ARN_STAGING || '' }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-${{ github.run_id }}
-        if: ${{ secrets.AWS_ACCESS_KEY_ID || secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
 
       - name: Load secrets from AWS
         run: |
@@ -105,14 +104,15 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Setup Python
+      - name: Setup Python for EB CLI
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install EB CLI
-        run: pip install awsebcli==3.21.0
+        run: |
+          pip install awsebcli
 
       - name: Create deployment package
         run: |
@@ -137,13 +137,14 @@ jobs:
   notify:
     name: Notify Deployment Status
     runs-on: ubuntu-latest
-    needs: [build-and-deploy]
+    needs: build-and-deploy
     if: always()
     steps:
       - name: Notify success
         if: needs.build-and-deploy.result == 'success'
-        run: echo "✅ Deployment successful to ${{ needs.build-and-deploy.outputs.deployment-url }}"
-
+        run: |
+          echo "✅ Deployment successful to ${{ needs.build-and-deploy.outputs.deployment-url }}"
+          
       - name: Notify failure
         if: needs.build-and-deploy.result == 'failure'
         run: |
