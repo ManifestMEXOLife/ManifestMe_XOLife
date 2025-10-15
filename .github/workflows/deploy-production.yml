@@ -106,9 +106,9 @@ jobs:
       - name: Create deployment package
         run: |
           if [ -d dist ]; then
-            zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ .ebextensions/ -x "*.git*" "node_modules/*" "*.log"
+            zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ -x "*.git*" "node_modules/*" "*.log"
           else
-            zip -r app-${{ github.sha }}.zip . -x "*.git*" "node_modules/*" "*.log" "dist/*" "src/*" "*.ts" "tsconfig.json"
+            zip -r app-${{ github.sha }}.zip . -x "*.git*" "node_modules/*" "*.log" "dist/*" "src/*" "*.ts" "tsconfig.json" ".ebextensions/*"
           fi
 
       - name: Deploy to Elastic Beanstalk
