@@ -123,19 +123,29 @@ jobs:
         run: |
           ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
           echo "Checking Elastic Beanstalk environment health for $ENV_NAME..."
-          
+
           MAX_RETRIES=40
           SLEEP=15
           SUCCESS=0
-          
+
           for i in $(seq 1 $MAX_RETRIES); do
             STATUS=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
             echo "Attempt $i: Environment health status = $STATUS"
-            
+
             # Tail last 20 lines of logs if not green
             if [ "$STATUS" != "Green" ]; then
-              echo "Tailing last 20 lines of EB logs for debugging..."
-              eb logs $ENV_NAME --all --num 20 || true
+              echo "Fetching EB logs for debugging..."
+              eb logs $ENV_NAME --all > eb_logs.txt || true
+              echo "Last 20 lines of logs:"
+              tail -n 20 eb_logs.txt
+            fi
+
+            # Check for common causes (Node app failed, missing PORT)
+            if grep -iq "Error" eb_logs.txt; then
+              echo "⚠️ Found errors in EB logs, likely cause of Yellow/Red health."
+            fi
+            if ! grep -iq "PORT" eb_logs.txt; then
+              echo "⚠️ PORT environment variable may be missing, app might not bind to correct port."
             fi
 
             if [ "$STATUS" = "Green" ]; then
@@ -144,12 +154,12 @@ jobs:
             fi
             sleep $SLEEP
           done
-          
+
           if [ "$SUCCESS" -ne 1 ]; then
             echo "❌ Environment health did not become Green after $((MAX_RETRIES*SLEEP)) seconds"
             exit 1
           fi
-          
+
           echo "✅ Environment health is Green!"
 
   notify:
