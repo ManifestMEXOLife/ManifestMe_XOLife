@@ -8,6 +8,12 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  EB_ENV_NAME: 'manifestme-staging'
+  EB_APP_NAME: 'manifestme-api'
+
 jobs:
   build-and-deploy:
     name: Build and Deploy to Staging
@@ -21,7 +27,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: npm ci
@@ -46,62 +52,62 @@ jobs:
         run: npx tsc
 
       - name: Check deploy credentials
-        # Determine whether an OIDC role or static AWS keys are configured.
-        # We set an output so the strong `configure-aws-credentials` action only
-        # runs when inputs are present, avoiding runtime failures at step time.
         id: creds-check
         run: |
           creds=false
           if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
             creds=true
+            echo "USE_OIDC=true" >> $GITHUB_ENV
           elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
             creds=true
+            echo "USE_STATIC=true" >> $GITHUB_ENV
           fi
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials (OIDC)
-        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN != ''
+        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_OIDC == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS Credentials (static)
-        if: steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != ''
+        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_STATIC == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Install EB CLI
-        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install awsebcli==3.21.14
 
       - name: Package and Deploy to Staging
-        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
         run: |
           if [ -d dist ]; then
-            zip -r app.zip dist package.json package-lock.json -x "*.git*" "node_modules/*"
+            zip -r app.zip dist package.json package-lock.json prisma/ Procfile -x "*.git*" "node_modules/*"
           else
             zip -r app.zip package.json package-lock.json -x "*.git*" "node_modules/*"
           fi
-          eb init ${{ secrets.EB_APP_NAME || 'manifestme-api' }} --region ${{ secrets.AWS_REGION || 'us-east-1' }} --platform "Node.js 22"
-          eb deploy ${{ secrets.EB_ENV_NAME || 'manifestme-staging' }}
+          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
+          eb setenv PORT=8080 || true
+          eb deploy ${{ env.EB_ENV_NAME }}
 
       - name: Install AWS CLI (for describing environment)
-        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install awscli
 
       - name: Describe EB environment and run smoke test
-        if: ${{ secrets.AWS_OIDC_ROLE_ARN || (secrets.AWS_ACCESS_KEY_ID && secrets.AWS_SECRET_ACCESS_KEY) }}
+        if: steps.creds-check.outputs.credentials_present == 'true'
         env:
-          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME || 'manifestme-staging' }}
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          EB_ENV_NAME: ${{ env.EB_ENV_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
           DO_AUTH_CHECK: ${{ secrets.SMOKE_TEST_EMAIL && '1' || '' }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
