@@ -120,27 +120,31 @@ jobs:
           eb deploy ${{ secrets.EB_ENV_NAME || 'manifestme-env' }} --staged --timeout 20
           echo "environment-url=$(eb status | grep CNAME | awk '{print $2}')" >> $GITHUB_OUTPUT
 
-      - name: Run health check
+      - name: Wait for Elastic Beanstalk environment to be healthy
         run: |
-          ENV_URL=${{ steps.deploy.outputs.environment-url }}
-          echo "Checking health at $ENV_URL/health..."
-          RETRIES=12
+          ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
+          echo "Checking Elastic Beanstalk environment health for $ENV_NAME..."
+          
+          MAX_RETRIES=30
           SLEEP=10
           SUCCESS=0
-          for i in $(seq 1 $RETRIES); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" $ENV_URL/health || true)
-            echo "Attempt $i: HTTP status $STATUS"
-            if [ "$STATUS" -eq 200 ]; then
+          
+          for i in $(seq 1 $MAX_RETRIES); do
+            HEALTH=$(eb health $ENV_NAME | grep 'Status' | awk '{print $2}')
+            echo "Attempt $i: Environment health status = $HEALTH"
+            if [ "$HEALTH" = "Green" ]; then
               SUCCESS=1
               break
             fi
             sleep $SLEEP
           done
+          
           if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ Health check failed after $((RETRIES*SLEEP)) seconds"
+            echo "❌ Environment health did not become Green after $((MAX_RETRIES*SLEEP)) seconds"
             exit 1
           fi
-          echo "✅ Health check passed!"
+          
+          echo "✅ Environment health is Green!"
 
   notify:
     name: Notify Deployment Status
