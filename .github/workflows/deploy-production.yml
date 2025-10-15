@@ -122,8 +122,25 @@ jobs:
 
       - name: Run health check
         run: |
-          sleep 30
-          curl -f ${{ steps.deploy.outputs.environment-url }}/health || exit 1
+          ENV_URL=${{ steps.deploy.outputs.environment-url }}
+          echo "Checking health at $ENV_URL/health..."
+          RETRIES=12
+          SLEEP=10
+          SUCCESS=0
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" $ENV_URL/health || true)
+            echo "Attempt $i: HTTP status $STATUS"
+            if [ "$STATUS" -eq 200 ]; then
+              SUCCESS=1
+              break
+            fi
+            sleep $SLEEP
+          done
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "❌ Health check failed after $((RETRIES*SLEEP)) seconds"
+            exit 1
+          fi
+          echo "✅ Health check passed!"
 
   notify:
     name: Notify Deployment Status
