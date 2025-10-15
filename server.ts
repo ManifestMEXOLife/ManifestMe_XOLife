@@ -2,8 +2,9 @@ import express, { Request, Response, NextFunction } from 'express';
 
 const app = express();
 
-// Use Elastic Beanstalk's PORT environment variable or default to 8080
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8080;
+// Use Elastic Beanstalk's PORT environment variable, fallback to 8080 locally
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const HOST = '0.0.0.0'; // Required for EB to access the container externally
 
 // Simple logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -21,11 +22,12 @@ app.get('/', (req: Request, res: Response) => {
   res.send('Server is running!');
 });
 
-// Start server with error handling
-app.listen(PORT, '0.0.0.0', (err?: any) => {
-  if (err) {
-    console.error('Server failed to start:', err);
+// Graceful startup with error handling
+app.listen(PORT, HOST)
+  .on('listening', () => {
+    console.log(`✅ Server listening on ${HOST}:${PORT}`);
+  })
+  .on('error', (err: any) => {
+    console.error('❌ Server failed to start:', err);
     process.exit(1);
-  }
-  console.log(`Server listening on port ${PORT}`);
-});
+  });
