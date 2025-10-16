@@ -56,26 +56,30 @@ jobs:
       - name: Build application
         run: npm run build || npx tsc
 
-      - name: Check deploy credentials
-        id: creds-check
+      - name: Configure AWS Credentials (OIDC or static)
+        id: aws-creds
         run: |
-          creds=false
+          echo "🔍 Checking AWS credentials..."
           if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ]; then
-            creds=true
+            echo "✅ Using OIDC role credentials"
+            echo "method=oidc" >> $GITHUB_OUTPUT
           elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            creds=true
+            echo "✅ Using static access key credentials"
+            echo "method=static" >> $GITHUB_OUTPUT
+          else
+            echo "❌ No AWS credentials found — stopping deployment"
+            exit 1
           fi
-          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Credentials (OIDC staging)
-        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN_STAGING != '' }}
+      - name: Configure AWS OIDC Credentials
+        if: steps.aws-creds.outputs.method == 'oidc'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Configure AWS Credentials (static)
-        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != '' }}
+      - name: Configure AWS Static Credentials
+        if: steps.aws-creds.outputs.method == 'static'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
