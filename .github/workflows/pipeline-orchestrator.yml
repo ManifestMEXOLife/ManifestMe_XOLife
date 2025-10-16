@@ -1,4 +1,4 @@
-name: Full CI/CD Orchestrator
+name: Full CI/CD Orchestrator (Robust)
 
 on:
   workflow_dispatch:
@@ -101,6 +101,15 @@ jobs:
           npm audit --audit-level=moderate
           npx snyk test --severity-threshold=high || echo "Snyk scan failed but continuing"
 
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: |
+            coverage/
+            test-results/
+          retention-days: 7
+
   deploy:
     name: Build & Deploy
     runs-on: ubuntu-latest
@@ -119,6 +128,17 @@ jobs:
 
       - name: Build application
         run: npm run build || npx tsc
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: |
+            dist/
+            prisma/
+            package.json
+            package-lock.json
+          retention-days: 7
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -184,13 +204,26 @@ jobs:
           CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
           echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
 
-      - name: Run smoke tests
+      - name: Run smoke tests with retries
         env:
           TARGET_URL: ${{ env.TARGET_URL }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
-          node scripts/post_deploy_smoke.js
+          MAX_RETRIES=5
+          SLEEP=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i: Running smoke tests..."
+            if node scripts/post_deploy_smoke.js; then
+              echo "✅ Smoke tests passed!"
+              exit 0
+            else
+              echo "⚠️ Smoke tests failed. Retrying in $SLEEP seconds..."
+              sleep $SLEEP
+            fi
+          done
+          echo "❌ Smoke tests failed after $MAX_RETRIES attempts"
+          exit 1
 
   notify:
     name: Notify Deployment Status
