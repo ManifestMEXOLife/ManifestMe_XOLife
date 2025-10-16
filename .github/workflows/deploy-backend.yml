@@ -51,6 +51,19 @@ jobs:
       - name: Build TypeScript
         run: npm run build || npx tsc
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: |
+            dist/
+            package.json
+            package-lock.json
+            prisma/
+            .ebextensions/
+            Procfile
+          retention-days: 7
+
   deploy:
     name: Deploy to Elastic Beanstalk
     needs: build
@@ -58,20 +71,16 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: ./deploy
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application
-        run: npm run build || npx tsc
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -92,17 +101,19 @@ jobs:
 
       - name: Create deployment package
         run: |
-          zip -r app.zip dist/ package.json package-lock.json prisma/ .ebextensions/ Procfile -x "*.git*" "node_modules/*" "src/*" "*.ts" "tsconfig.json"
+          cd deploy
+          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json"
 
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
           MAX_RETRIES=5
           SLEEP=10
+          cd deploy
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Deploy attempt $i..."
+            echo "🚀 Deployment attempt $i..."
             if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
               eb setenv PORT=8080 || true
-              if eb deploy ${{ env.EB_ENV_NAME }} --timeout 20; then
+              if eb deploy ${{ env.EB_ENV_NAME }} --staged --timeout 20; then
                 echo "✅ Deployment succeeded"
                 break
               fi
@@ -115,7 +126,7 @@ jobs:
             fi
           done
 
-      - name: Wait for Elastic Beanstalk environment to be healthy
+      - name: Wait for EB environment to be healthy
         run: |
           MAX_RETRIES=40
           SLEEP=15
