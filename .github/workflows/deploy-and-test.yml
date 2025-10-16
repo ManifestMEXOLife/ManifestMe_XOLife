@@ -1,0 +1,79 @@
+name: Deploy and Test ManifestMe Backend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-deploy-test:
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_VERSION: '22'
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EB_APP_NAME: "manifestme-api"
+      EB_ENV_NAME: "manifestme-env"
+      EB_URL: "http://your-eb-url.us-east-1.elasticbeanstalk.com" # Replace with your EB URL
+
+    steps:
+      # 1️⃣ Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4️⃣ Build TypeScript
+      - name: Build TypeScript
+        run: npm run build
+
+      # 5️⃣ Zip project for EB
+      - name: Zip project
+        run: zip -r manifestme-backend.zip . -x "*.git*" "node_modules/*" "*.github/*"
+
+      # 6️⃣ Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 7️⃣ Upload zip to S3 & deploy EB
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          aws s3 cp manifestme-backend.zip s3://${{ secrets.S3_BUCKET }}/manifestme-backend.zip
+          aws elasticbeanstalk create-application-version \
+            --application-name ${{ env.EB_APP_NAME }} \
+            --version-label github-${{ github.run_id }} \
+            --source-bundle S3Bucket=${{ secrets.S3_BUCKET }},S3Key=manifestme-backend.zip
+          aws elasticbeanstalk update-environment \
+            --environment-name ${{ env.EB_ENV_NAME }} \
+            --version-label github-${{ github.run_id }}
+
+      # 8️⃣ Wait for EB environment to finish updating
+      - name: Wait for EB deployment
+        run: |
+          echo "Waiting 60 seconds for environment to stabilize..."
+          sleep 60
+
+      # 9️⃣ Test deployed API endpoint
+      - name: Test API endpoint
+        run: |
+          echo "Testing / endpoint..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.EB_URL }}/)
+          if [ "$STATUS_CODE" -ne 200 ]; then
+            echo "API test failed! Status code: $STATUS_CODE"
+            exit 1
+          else
+            echo "API test passed! Status code: $STATUS_CODE"
+          fi
