@@ -68,21 +68,19 @@ jobs:
           echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials (OIDC staging)
-        if: steps.creds-check.outputs.credentials_present == 'true'
-        run: |
-          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}" ]; then
-            echo "Configuring AWS credentials via OIDC..."
-            gh run prepare-oidc
-            aws-actions/configure-aws-credentials@v4 --role-to-assume ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }} --aws-region ${{ env.AWS_REGION }}
-          fi
+        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_OIDC_ROLE_ARN_STAGING != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS Credentials (static)
-        if: steps.creds-check.outputs.credentials_present == 'true'
-        run: |
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            echo "Configuring AWS credentials via static keys..."
-            aws-actions/configure-aws-credentials@v4 --aws-access-key-id ${{ secrets.AWS_ACCESS_KEY_ID }} --aws-secret-access-key ${{ secrets.AWS_SECRET_ACCESS_KEY }} --aws-region ${{ env.AWS_REGION }}
-          fi
+        if: ${{ steps.creds-check.outputs.credentials_present == 'true' && secrets.AWS_ACCESS_KEY_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Python for EB CLI
         uses: actions/setup-python@v4
@@ -95,6 +93,7 @@ jobs:
       - name: Deploy to staging
         run: |
           eb init ${{ secrets.EB_APP_NAME_STAGING || 'manifestme-api-staging' }} --region ${{ env.AWS_REGION }} --platform "Node.js 22"
+          sleep 5
           eb deploy ${{ secrets.EB_ENV_NAME_STAGING || 'manifestme-staging' }} --timeout 15
 
       - name: Comment PR with staging URL
