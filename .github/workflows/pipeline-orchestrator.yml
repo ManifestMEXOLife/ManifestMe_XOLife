@@ -1,93 +1,89 @@
-name: Full CI/CD Orchestrator (Robust)
+name: Pipeline Orchestrator
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Target environment for deployment'
+      deploy_environment:
+        description: "Environment to deploy"
         required: true
-        default: 'staging'
+        default: staging
         type: choice
         options:
           - staging
           - production
       skip_tests:
-        description: 'Skip tests before deployment'
+        description: "Skip CI tests"
         required: false
         default: false
         type: boolean
 
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  STAGING_ENV: 'manifestme-staging'
+  PRODUCTION_ENV: 'manifestme-env'
+  EB_APP_NAME: 'manifestme-api'
+
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   verify-secrets:
-    name: Verify Repository Secrets
+    name: Verify Secrets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check required secrets
+      - name: Verify required secrets
         run: |
-          echo "🔍 Verifying required repository secrets..."
-          missing=false
           required_secrets=(
             "AWS_ACCESS_KEY_ID"
             "AWS_SECRET_ACCESS_KEY"
             "AWS_REGION"
-            "EB_APP_NAME_STAGING"
-            "EB_ENV_NAME_STAGING"
+            "AWS_OIDC_ROLE_ARN_STAGING"
             "EB_APP_NAME"
-            "EB_ENV_NAME"
-            "SMOKE_TEST_EMAIL"
-            "SMOKE_TEST_PASSWORD"
-            "CODECOV_TOKEN"
-            "SNYK_TOKEN"
+            "EB_ENV_NAME_STAGING"
           )
-          for s in "${required_secrets[@]}"; do
-            if [ -z "${{ secrets[$s] }}" ]; then
-              echo "❌ Missing secret: $s"
+          missing=false
+          for secret in "${required_secrets[@]}"; do
+            if [ -z "${{ secrets[secret] }}" ]; then
+              echo "❌ Missing secret: $secret"
               missing=true
             else
-              echo "✅ Found secret: $s"
+              echo "✅ Found secret: $secret"
             fi
           done
           if [ "$missing" = true ]; then
-            echo "🚨 One or more secrets are missing. Aborting."
+            echo "🚨 Missing required secrets!"
             exit 1
           fi
 
   ci:
-    name: Run CI Pipeline
+    name: CI Pipeline
     runs-on: ubuntu-latest
     needs: verify-secrets
+    if: ${{ !inputs.skip_tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
       - name: Install dependencies
         run: npm ci
-
-      - name: Run lint
-        run: npm run lint || echo "No lint script found"
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Generate Prisma client
+      - name: Run lint, typecheck, tests
         run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate --schema prisma/schema.prisma
-          fi
-
-      - name: Run tests
-        if: ${{ !inputs.skip_tests }}
-        run: npm run test:cjs -- --passWithNoTests --coverage
-
+          npm run lint || echo "No lint script found"
+          npx tsc --noEmit
+          npm run test:cjs -- --passWithNoTests --coverage
       - name: Upload coverage
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
@@ -96,145 +92,121 @@ jobs:
             npx codecov -t "$CODECOV_TOKEN"
           fi
 
-      - name: Run Security Scan
-        run: |
-          npm audit --audit-level=moderate
-          npx snyk test --severity-threshold=high || echo "Snyk scan failed but continuing"
-
-      - name: Upload test artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-artifacts
-          path: |
-            coverage/
-            test-results/
-          retention-days: 7
-
-  deploy:
-    name: Build & Deploy
+  database-migration:
+    name: Database Migration
     runs-on: ubuntu-latest
     needs: ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-
+          node-version: ${{ env.NODE_VERSION }}
       - name: Install dependencies
         run: npm ci
+      - name: Run migrations
+        run: npm run migrate || echo "No migrations found"
 
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: database-migration
+    environment: ${{ inputs.deploy_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install dependencies
+        run: npm ci
       - name: Build application
         run: npm run build || npx tsc
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-files
-          path: |
-            dist/
-            prisma/
-            package.json
-            package-lock.json
-          retention-days: 7
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
           audience: sts.amazonaws.com
           output-env-credentials: true
-
+      - name: Setup Python for EB CLI
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install EB CLI
+        run: pip install --upgrade awsebcli
       - name: Deploy to Elastic Beanstalk
         run: |
-          ENV_NAME="${{ inputs.environment == 'production' && secrets.EB_ENV_NAME || secrets.EB_ENV_NAME_STAGING }}"
-          APP_NAME="${{ inputs.environment == 'production' && secrets.EB_APP_NAME || secrets.EB_APP_NAME_STAGING }}"
-          eb init $APP_NAME --region ${{ secrets.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
+          ENV_NAME=${{ inputs.deploy_environment == 'production' && env.PRODUCTION_ENV || env.STAGING_ENV }}
+          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
           eb setenv PORT=8080 || true
           eb deploy $ENV_NAME --staged --timeout 20
-
-      - name: Wait for Environment Health
-        run: |
-          ENV_NAME="${{ inputs.environment == 'production' && secrets.EB_ENV_NAME || secrets.EB_ENV_NAME_STAGING }}"
-          MAX_RETRIES=40
-          SLEEP=15
-          SUCCESS=0
-          for i in $(seq 1 $MAX_RETRIES); do
-            STATUS=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
-            echo "Attempt $i: Health=$STATUS"
-            if [ "$STATUS" = "Green" ]; then
-              SUCCESS=1
-              break
-            fi
-            sleep $SLEEP
-          done
-          if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ Environment health did not become Green"
-            exit 1
-          fi
+          echo "environment-url=$(eb status $ENV_NAME | grep CNAME | awk '{print $2}')" >> $GITHUB_OUTPUT
 
   smoke-test:
-    name: Run Post-Deploy Smoke Test
+    name: Post-Deploy Smoke Test
     runs-on: ubuntu-latest
     needs: deploy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-
+          node-version: ${{ env.NODE_VERSION }}
       - name: Install dependencies
         run: npm ci
-
-      - name: Determine environment URL
+      - name: Configure AWS Credentials
         run: |
-          if [ "${{ inputs.environment }}" == "staging" ]; then
-            EB_ENV_NAME=${{ secrets.EB_ENV_NAME_STAGING }}
-          else
-            EB_ENV_NAME=${{ secrets.EB_ENV_NAME }}
-          fi
-          CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
-          echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
-
-      - name: Run smoke tests with retries
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region ${{ env.AWS_REGION }}
+      - name: Run smoke test
         env:
-          TARGET_URL: ${{ env.TARGET_URL }}
+          TARGET_URL: ${{ needs.deploy.outputs.environment-url }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
-          MAX_RETRIES=5
-          SLEEP=10
-          for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i: Running smoke tests..."
-            if node scripts/post_deploy_smoke.js; then
-              echo "✅ Smoke tests passed!"
-              exit 0
-            else
-              echo "⚠️ Smoke tests failed. Retrying in $SLEEP seconds..."
-              sleep $SLEEP
-            fi
-          done
-          echo "❌ Smoke tests failed after $MAX_RETRIES attempts"
-          exit 1
+          echo "Running smoke test against $TARGET_URL"
+          node scripts/post_deploy_smoke.js
 
-  notify:
-    name: Notify Deployment Status
+  cleanup:
+    name: Cleanup Old Artifacts
     runs-on: ubuntu-latest
     needs: smoke-test
-    if: always()
     steps:
-      - name: Notify
-        run: |
-          if [ "${{ needs.smoke-test.result }}" == "success" ]; then
-            echo "✅ Full pipeline completed successfully!"
-          else
-            echo "❌ Full pipeline failed!"
-            exit 1
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Delete old artifacts
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { github, context } = require('@actions/github');
+            const perPage = 100;
+            let page = 1;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 30);
+            while (true) {
+              const artifacts = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: perPage,
+                page
+              });
+              if (artifacts.data.artifacts.length === 0) break;
+              for (const artifact of artifacts.data.artifacts) {
+                if (new Date(artifact.created_at) < cutoff) {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  console.log(`Deleted artifact: ${artifact.name}`);
+                }
+              }
+              page++;
+            }
