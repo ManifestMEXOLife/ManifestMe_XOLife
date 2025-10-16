@@ -8,7 +8,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  id-token: write # allow OIDC token issuance for aws-actions/configure-aws-credentials
+  id-token: write
   contents: read
 
 env:
@@ -19,7 +19,7 @@ env:
 
 jobs:
   build:
-    name: Build and Test
+    name: Build & Test
     runs-on: ubuntu-latest
 
     steps:
@@ -37,8 +37,7 @@ jobs:
 
       - name: Clean build artifacts
         run: |
-          rm -rf dist || true
-          rm -rf coverage || true
+          rm -rf dist coverage || true
 
       - name: Generate Prisma client
         run: |
@@ -56,7 +55,6 @@ jobs:
     name: Deploy to Elastic Beanstalk
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
     environment: production
 
     steps:
@@ -72,12 +70,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
-        run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
-          fi
-
       - name: Build application
         run: npm run build || npx tsc
 
@@ -86,28 +78,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Check deploy credentials
-        id: creds-check
-        run: |
-          creds=false
-          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
-            creds=true
-            echo "USE_OIDC=true" >> $GITHUB_ENV
-          elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            creds=true
-            echo "USE_STATIC=true" >> $GITHUB_ENV
-          fi
-          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
-
-      - name: Configure AWS Credentials (OIDC)
-        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_OIDC == 'true'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Configure AWS Credentials (static)
-        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_STATIC == 'true'
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -117,24 +88,49 @@ jobs:
       - name: Install EB CLI
         run: |
           python -m pip install --upgrade pip
-          pip install awsebcli==3.21.14
-
-      - name: Load secrets (optional)
-        run: |
-          if [ -f fetchSecret.safe.ts ]; then
-            npx ts-node --files fetchSecret.safe.ts
-          fi
-        continue-on-error: true
-
-      - name: Clean coverage
-        run: rm -rf coverage || true
+          pip install --upgrade awsebcli
 
       - name: Create deployment package
         run: |
           zip -r app.zip dist/ package.json package-lock.json prisma/ .ebextensions/ Procfile -x "*.git*" "node_modules/*" "src/*" "*.ts" "tsconfig.json"
 
-      - name: Deploy to Elastic Beanstalk
+      - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
-          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
-          eb setenv PORT=8080 || true
-          eb deploy ${{ env.EB_ENV_NAME }} --timeout 20
+          MAX_RETRIES=5
+          SLEEP=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Deploy attempt $i..."
+            if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
+              eb setenv PORT=8080 || true
+              if eb deploy ${{ env.EB_ENV_NAME }} --timeout 20; then
+                echo "✅ Deployment succeeded"
+                break
+              fi
+            fi
+            echo "⚠️ Deployment failed, retrying in $SLEEP seconds..."
+            sleep $SLEEP
+            if [ $i -eq $MAX_RETRIES ]; then
+              echo "❌ Deployment failed after $MAX_RETRIES attempts"
+              exit 1
+            fi
+          done
+
+      - name: Wait for Elastic Beanstalk environment to be healthy
+        run: |
+          MAX_RETRIES=40
+          SLEEP=15
+          SUCCESS=0
+          for i in $(seq 1 $MAX_RETRIES); do
+            STATUS=$(eb status ${{ env.EB_ENV_NAME }} | grep "Health:" | awk '{print $2}')
+            echo "Attempt $i: Environment health = $STATUS"
+            if [ "$STATUS" = "Green" ]; then
+              SUCCESS=1
+              break
+            fi
+            sleep $SLEEP
+          done
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "❌ EB environment did not become healthy in time"
+            exit 1
+          fi
+          echo "✅ EB environment is Green!"
