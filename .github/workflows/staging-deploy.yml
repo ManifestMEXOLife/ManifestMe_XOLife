@@ -41,8 +41,7 @@ jobs:
         run: npm ci
 
       - name: Clean build artifacts
-        run: |
-          rm -rf dist coverage || true
+        run: rm -rf dist coverage || true
 
       - name: Generate Prisma client
         run: |
@@ -92,7 +91,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install EB CLI
-        run: pip install awsebcli==3.21.14
+        run: pip install awsebcli
 
       - name: Deploy to staging
         run: |
