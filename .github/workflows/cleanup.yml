@@ -1,31 +1,30 @@
 name: Cleanup Old Artifacts
 
+# Trigger manually or on a schedule
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0' # Runs every Sunday at midnight
+    - cron: '0 0 * * SUN'  # Every Sunday at midnight UTC
+
+permissions:
+  contents: read
+  actions: write  # Needed to delete artifacts
 
 jobs:
   cleanup:
     name: Delete old artifacts
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
 
     steps:
-      - name: Delete old artifacts
+      - name: Delete artifacts older than 30 days
         uses: actions/github-script@v8
         with:
           script: |
-            const cutoffDays = 30;
             const { github, context } = require('@actions/github');
             const perPage = 100;
             let page = 1;
             const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - cutoffDays);
-            console.log(`Deleting artifacts older than ${cutoffDays} days (${cutoff.toISOString()})`);
-            
+            cutoff.setDate(cutoff.getDate() - 30);
             while (true) {
               const artifacts = await github.rest.actions.listArtifactsForRepo({
                 owner: context.repo.owner,
@@ -33,12 +32,7 @@ jobs:
                 per_page: perPage,
                 page
               });
-              
-              if (artifacts.data.artifacts.length === 0) {
-                console.log('No more artifacts to check.');
-                break;
-              }
-
+              if (artifacts.data.artifacts.length === 0) break;
               for (const artifact of artifacts.data.artifacts) {
                 if (new Date(artifact.created_at) < cutoff) {
                   await github.rest.actions.deleteArtifact({
@@ -46,16 +40,8 @@ jobs:
                     repo: context.repo.repo,
                     artifact_id: artifact.id
                   });
-                  console.log(`🗑️ Deleted artifact: ${artifact.name} (${artifact.created_at})`);
+                  console.log(`Deleted artifact: ${artifact.name}`);
                 }
               }
-
-              if (artifacts.data.artifacts.length < perPage) {
-                console.log('Reached the end of artifact list.');
-                break;
-              }
-
               page++;
             }
-
-            console.log('Cleanup complete.');
