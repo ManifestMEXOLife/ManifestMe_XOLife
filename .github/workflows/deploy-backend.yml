@@ -1,4 +1,4 @@
-name: Build, Deploy & Smoke Test Backend
+name: Build & Deploy Backend (Staging → Production)
 
 on:
   push:
@@ -13,11 +13,12 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  EB_ENV_NAME: manifestme-env
   EB_APP_NAME: manifestme-api
   NODE_VERSION: '22'
   MAX_HEALTH_RETRIES: 40
   HEALTH_SLEEP: 15
+  MAX_DEPLOY_RETRIES: 5
+  DEPLOY_SLEEP: 10
   MAX_SMOKE_RETRIES: 5
   SMOKE_SLEEP: 10
 
@@ -54,7 +55,7 @@ jobs:
       - name: Build TypeScript
         run: npm run build || npx tsc
 
-      - name: Upload build artifacts (exclude invalid paths)
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-files
@@ -66,14 +67,21 @@ jobs:
             .ebextensions/**
             Procfile
           exclude:
-            - '**/*:*'   # Exclude files with colon
+            - '**/*:*'  # Exclude files with colon
           retention-days: 7
 
   deploy:
-    name: Deploy to Elastic Beanstalk
+    name: Deploy to Staging & Production
     needs: build
     runs-on: ubuntu-latest
-    environment: production
+
+    strategy:
+      matrix:
+        environment: [staging, production]
+
+    env:
+      STAGING_ENV: manifestme-staging
+      PRODUCTION_ENV: manifestme-env
 
     steps:
       - name: Download build artifacts
@@ -104,6 +112,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade awsebcli
 
+      - name: Determine environment name
+        run: |
+          if [ "${{ matrix.environment }}" == "staging" ]; then
+            echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
+          else
+            echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
+          fi
+          echo "Deploying to $EB_ENV_NAME"
+
       - name: Create deployment package
         run: |
           cd deploy
@@ -111,22 +128,20 @@ jobs:
 
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
-          MAX_RETRIES=5
-          SLEEP=10
           cd deploy
-          for i in $(seq 1 $MAX_RETRIES); do
-            echo "🚀 Deployment attempt $i..."
+          for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
+            echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
             if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
               eb setenv PORT=8080 || true
-              if eb deploy ${{ env.EB_ENV_NAME }} --staged --timeout 20; then
+              if eb deploy $EB_ENV_NAME --staged --timeout 20; then
                 echo "✅ Deployment succeeded"
                 break
               fi
             fi
-            echo "⚠️ Deployment failed, retrying in $SLEEP seconds..."
-            sleep $SLEEP
-            if [ $i -eq $MAX_RETRIES ]; then
-              echo "❌ Deployment failed after $MAX_RETRIES attempts"
+            echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
+            sleep ${{ env.DEPLOY_SLEEP }}
+            if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
+              echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
               exit 1
             fi
           done
@@ -135,7 +150,7 @@ jobs:
         run: |
           SUCCESS=0
           for i in $(seq 1 ${{ env.MAX_HEALTH_RETRIES }}); do
-            STATUS=$(eb status ${{ env.EB_ENV_NAME }} | grep "Health:" | awk '{print $2}')
+            STATUS=$(eb status $EB_ENV_NAME | grep "Health:" | awk '{print $2}')
             echo "Attempt $i: Environment health = $STATUS"
             if [ "$STATUS" = "Green" ]; then
               SUCCESS=1
@@ -152,7 +167,7 @@ jobs:
       - name: Determine Environment URL
         id: env-url
         run: |
-          URL=$(eb status ${{ env.EB_ENV_NAME }} | grep CNAME | awk '{print $2}')
+          URL=$(eb status $EB_ENV_NAME | grep CNAME | awk '{print $2}')
           echo "TARGET_URL=https://$URL" >> $GITHUB_ENV
           echo "Environment URL: https://$URL"
 
