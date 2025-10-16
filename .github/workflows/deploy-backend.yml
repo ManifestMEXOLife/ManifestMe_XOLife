@@ -28,7 +28,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,7 +44,10 @@ jobs:
         run: rm -rf dist coverage || true
 
       - name: Generate Prisma client
-        run: npx prisma generate || true
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            npx prisma generate
+          fi
 
       - name: Run tests
         run: npm run test:cjs -- --passWithNoTests
@@ -51,18 +55,19 @@ jobs:
       - name: Build TypeScript
         run: npm run build || npx tsc
 
+      - name: Prepare artifact folder
+        run: |
+          mkdir -p artifact
+          # Copy only valid files (exclude filenames with colons)
+          rsync -av --exclude='*:*' dist/ artifact/dist/
+          rsync -av --exclude='*:*' prisma/ artifact/prisma/
+          cp package.json package-lock.json Procfile .ebextensions/ artifact/ || true
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-files
-          path: |
-            dist/**
-            package.json
-            package-lock.json
-            prisma/**
-            .ebextensions/**
-            Procfile
-          exclude: '**/*:*'
+          path: artifact
           retention-days: 7
 
   deploy:
@@ -79,7 +84,8 @@ jobs:
       PRODUCTION_ENV: manifestme-env
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
           name: build-files
           path: ./deploy
@@ -108,7 +114,7 @@ jobs:
 
       - name: Determine environment name
         run: |
-          if [ "${{ matrix.environment }}" = "staging" ]; then
+          if [ "${{ matrix.environment }}" == "staging" ]; then
             echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
           else
             echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
@@ -118,7 +124,7 @@ jobs:
       - name: Create deployment package
         run: |
           cd deploy
-          zip -r app.zip . -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
+          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
