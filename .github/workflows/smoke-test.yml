@@ -1,6 +1,5 @@
 name: Post-Deploy Smoke Test
 
-# Trigger manually or after CI pipeline completes
 on:
   workflow_dispatch:
     inputs:
@@ -45,17 +44,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure AWS Credentials (static)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-            echo "Configuring AWS credentials..."
-            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
-            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
-            aws configure set region "${{ env.AWS_REGION }}"
-          fi
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Determine environment URL
         id: env-url
@@ -66,12 +60,39 @@ jobs:
             EB_ENV_NAME=${{ env.PRODUCTION_ENV }}
           fi
           echo "Fetching CNAME for environment: $EB_ENV_NAME"
-          CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
+          CNAME=$(aws elasticbeanstalk describe-environments \
+            --environment-names "$EB_ENV_NAME" \
+            --query 'Environments[0].CNAME' \
+            --output text)
           if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
-            echo "Could not fetch CNAME for $EB_ENV_NAME"
+            echo "❌ Could not fetch CNAME for $EB_ENV_NAME"
             exit 1
           fi
           echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
+          echo "Environment URL: $TARGET_URL"
+
+      - name: Wait for environment to be healthy
+        run: |
+          EB_ENV_NAME="${{ github.event.inputs.environment == 'staging' && env.STAGING_ENV || env.PRODUCTION_ENV }}"
+          echo "Waiting for $EB_ENV_NAME to become healthy..."
+          MAX_RETRIES=30
+          SLEEP=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            STATUS=$(aws elasticbeanstalk describe-environments \
+              --environment-names "$EB_ENV_NAME" \
+              --query 'Environments[0].Health' \
+              --output text)
+            echo "Attempt $i: Environment health = $STATUS"
+            if [ "$STATUS" == "Green" ]; then
+              echo "✅ Environment is healthy!"
+              break
+            fi
+            sleep $SLEEP
+            if [ "$i" -eq "$MAX_RETRIES" ]; then
+              echo "❌ Environment did not become healthy after $((MAX_RETRIES*SLEEP)) seconds"
+              exit 1
+            fi
+          done
 
       - name: Run smoke script
         env:
