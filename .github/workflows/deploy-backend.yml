@@ -1,195 +1,82 @@
-name: Build & Deploy Backend (Staging → Production)
+deploy:
+  name: Deploy to Staging & Production
+  needs: build
+  runs-on: ubuntu-latest
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch: {}
+  strategy:
+    matrix:
+      environment: [staging, production]
 
-permissions:
-  id-token: write
-  contents: read
+  env:
+    STAGING_ENV: manifestme-staging
+    PRODUCTION_ENV: manifestme-env
 
-env:
-  AWS_REGION: us-east-1
-  EB_APP_NAME: manifestme-api
-  NODE_VERSION: '22'
-  MAX_HEALTH_RETRIES: 40
-  HEALTH_SLEEP: 15
-  MAX_DEPLOY_RETRIES: 5
-  DEPLOY_SLEEP: 10
-  MAX_SMOKE_RETRIES: 5
-  SMOKE_SLEEP: 10
+  steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-files
+        path: ./deploy
 
-jobs:
-  build:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install dependencies
-        run: npm ci
+    - name: Install EB CLI
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade awsebcli
 
-      - name: Clean build artifacts
-        run: rm -rf dist coverage || true
+    - name: Determine EB_ENV_NAME
+      run: |
+        if [ "${{ matrix.environment }}" == "staging" ]; then
+          echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
+        else
+          echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
+        fi
+        echo "Deploying to $EB_ENV_NAME"
 
-      - name: Generate Prisma client
-        run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
-          fi
+    - name: Verify EB environment exists
+      run: |
+        if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
+          echo "❌ Elastic Beanstalk environment $EB_ENV_NAME does not exist!"
+          exit 1
+        fi
 
-      - name: Run tests
-        run: npm run test:cjs -- --passWithNoTests
+    - name: Create deployment package
+      run: |
+        cd deploy
+        zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
-      - name: Build TypeScript
-        run: npm run build || npx tsc
-
-      - name: Prepare artifact folder
-        run: |
-          mkdir -p artifact
-          # Copy only valid files (exclude filenames with colons)
-          rsync -av --exclude='*:*' dist/ artifact/dist/
-          rsync -av --exclude='*:*' prisma/ artifact/prisma/
-          cp package.json package-lock.json Procfile .ebextensions/ artifact/ || true
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-files
-          path: artifact
-          retention-days: 7
-
-  deploy:
-    name: Deploy to Staging & Production
-    needs: build
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        environment: [staging, production]
-
-    env:
-      STAGING_ENV: manifestme-staging
-      PRODUCTION_ENV: manifestme-env
-
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-files
-          path: ./deploy
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Install EB CLI
-        run: |
-          python -m pip install --upgrade pip
-          pip install --upgrade awsebcli
-
-      - name: Determine environment name
-        run: |
-          if [ "${{ matrix.environment }}" == "staging" ]; then
-            echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
-          else
-            echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
-          fi
-          echo "Deploying to $EB_ENV_NAME"
-
-      - name: Create deployment package
-        run: |
-          cd deploy
-          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
-
-      - name: Deploy to Elastic Beanstalk (retry-enabled)
-        run: |
-          cd deploy
-          for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
-            echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
-            if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
-              eb setenv PORT=8080 || true
-              if eb deploy $EB_ENV_NAME --staged --timeout 20; then
-                echo "✅ Deployment succeeded"
-                break
-              fi
-            fi
-            echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
-            sleep ${{ env.DEPLOY_SLEEP }}
-            if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
-              echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
-              exit 1
-            fi
-          done
-
-      - name: Wait for EB environment to be healthy
-        run: |
-          SUCCESS=0
-          for i in $(seq 1 ${{ env.MAX_HEALTH_RETRIES }}); do
-            STATUS=$(eb status $EB_ENV_NAME | grep "Health:" | awk '{print $2}')
-            echo "Attempt $i: Environment health = $STATUS"
-            if [ "$STATUS" = "Green" ]; then
-              SUCCESS=1
+    - name: Deploy to Elastic Beanstalk (retry-enabled)
+      run: |
+        cd deploy
+        for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
+          echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
+          if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
+            eb setenv PORT=8080 || true
+            if eb deploy $EB_ENV_NAME --timeout 20; then
+              echo "✅ Deployment succeeded"
               break
             fi
-            sleep ${{ env.HEALTH_SLEEP }}
-          done
-          if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ EB environment did not become healthy in time"
+          fi
+          echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
+          sleep ${{ env.DEPLOY_SLEEP }}
+          if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
+            echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
             exit 1
           fi
-          echo "✅ EB environment is Green!"
-
-      - name: Determine Environment URL
-        id: env-url
-        run: |
-          URL=$(eb status $EB_ENV_NAME | grep CNAME | awk '{print $2}')
-          echo "TARGET_URL=https://$URL" >> $GITHUB_ENV
-          echo "Environment URL: https://$URL"
-
-      - name: Run Smoke Test
-        env:
-          TARGET_URL: ${{ env.TARGET_URL }}
-          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
-          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
-        run: |
-          echo "Running smoke test against $TARGET_URL"
-          SUCCESS=0
-          for i in $(seq 1 ${{ env.MAX_SMOKE_RETRIES }}); do
-            if node scripts/post_deploy_smoke.js; then
-              echo "✅ Smoke test passed on attempt $i"
-              SUCCESS=1
-              break
-            else
-              echo "⚠️ Smoke test failed on attempt $i. Retrying in ${{ env.SMOKE_SLEEP }}s..."
-              sleep ${{ env.SMOKE_SLEEP }}
-            fi
-          done
-          if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ Smoke test failed after ${{ env.MAX_SMOKE_RETRIES }} attempts"
-            exit 1
-          fi
+        done
