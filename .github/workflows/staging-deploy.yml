@@ -87,7 +87,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Python for EB CLI
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
