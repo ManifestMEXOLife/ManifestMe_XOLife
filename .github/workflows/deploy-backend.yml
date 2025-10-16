@@ -28,8 +28,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -44,10 +43,7 @@ jobs:
         run: rm -rf dist coverage || true
 
       - name: Generate Prisma client
-        run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
-          fi
+        run: npx prisma generate || true
 
       - name: Run tests
         run: npm run test:cjs -- --passWithNoTests
@@ -66,8 +62,6 @@ jobs:
             prisma/**
             .ebextensions/**
             Procfile
-          exclude:
-            - '**/*:*'  # Exclude files with colon
           retention-days: 7
 
   deploy:
@@ -84,8 +78,7 @@ jobs:
       PRODUCTION_ENV: manifestme-env
 
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: build-files
           path: ./deploy
@@ -114,7 +107,7 @@ jobs:
 
       - name: Determine environment name
         run: |
-          if [ "${{ matrix.environment }}" == "staging" ]; then
+          if [ "${{ matrix.environment }}" = "staging" ]; then
             echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
           else
             echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
@@ -124,7 +117,7 @@ jobs:
       - name: Create deployment package
         run: |
           cd deploy
-          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
+          zip -r app.zip . -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
