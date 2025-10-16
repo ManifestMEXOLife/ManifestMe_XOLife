@@ -1,12 +1,10 @@
-name: Deploy Production Backend
+name: Deploy to Production
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
-      skip_tests:
-        description: 'Skip tests before deploy'
+      skip_smoke_tests:
+        description: 'Skip smoke tests'
         required: false
         default: false
         type: boolean
@@ -16,170 +14,138 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '22'
   AWS_REGION: 'us-east-1'
   EB_APP_NAME: 'manifestme-api'
   EB_ENV_NAME: 'manifestme-env'
-  MAX_HEALTH_RETRIES: 60
-  HEALTH_SLEEP: 15
-  MAX_SMOKE_RETRIES: 5
-  SMOKE_SLEEP: 10
 
 jobs:
-  build:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    if: ${{ !inputs.skip_tests }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Clean build artifacts
-        run: |
-          rm -rf dist coverage || true
-
-      - name: Generate Prisma client
-        run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
-          fi
-
-      - name: Run tests
-        run: npm run test:cjs -- --passWithNoTests
-
-      - name: Build TypeScript
-        run: npm run build || npx tsc
-
   deploy:
-    name: Deploy to Elastic Beanstalk
-    needs: build
+    name: Deploy Backend
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # ---------------------------
+      # 1️⃣ Download CI Build Artifact
+      # ---------------------------
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          name: build-files
+          path: ./artifact
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Generate Prisma client
+      # ---------------------------
+      # 2️⃣ Configure AWS Credentials
+      # ---------------------------
+      - name: Check deploy credentials
+        id: creds-check
         run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx prisma generate
+          creds=false
+          if [ -n "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
+            creds=true
+            echo "USE_OIDC=true" >> $GITHUB_ENV
+          elif [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            creds=true
+            echo "USE_STATIC=true" >> $GITHUB_ENV
           fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
 
-      - name: Build application
-        run: npm run build || npx tsc
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Configure AWS Credentials (OIDC)
+        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_OIDC == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          python-version: '3.11'
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials (Static)
+        if: steps.creds-check.outputs.credentials_present == 'true' && env.USE_STATIC == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install EB CLI
-        run: |
+      # ---------------------------
+      # 3️⃣ Install EB CLI
+      # ---------------------------
+      - name: Setup Python & EB CLI
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: |
           python -m pip install --upgrade pip
-          pip install --upgrade awsebcli
+          pip install awsebcli
 
-      - name: Wait for EB environment to be Ready
-        run: |
-          echo "⏳ Waiting for EB environment ${{ env.EB_ENV_NAME }} to be Ready..."
-          SUCCESS=0
-          for i in $(seq 1 ${{ env.MAX_HEALTH_RETRIES }}); do
-            STATUS=$(eb status ${{ env.EB_ENV_NAME }} | grep "Status:" | awk '{print $2}')
-            echo "Attempt $i: Status=$STATUS"
-            if [ "$STATUS" = "Ready" ]; then
-              SUCCESS=1
-              break
-            fi
-            sleep ${{ env.HEALTH_SLEEP }}
-          done
-          if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ EB environment not Ready after $(( ${{ env.MAX_HEALTH_RETRIES }} * ${{ env.HEALTH_SLEEP }} )) seconds"
-            exit 1
-          fi
-          echo "✅ EB environment is Ready!"
-
+      # ---------------------------
+      # 4️⃣ Prepare Deployment Package
+      # ---------------------------
       - name: Create deployment package
         run: |
+          cd artifact
           zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ Procfile -x "*.git*" "node_modules/*"
 
-      - name: Deploy to Elastic Beanstalk (with retries)
+      # ---------------------------
+      # 5️⃣ Deploy to Elastic Beanstalk (Retry-Friendly)
+      # ---------------------------
+      - name: Deploy to Elastic Beanstalk
         run: |
+          cd artifact
+          eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
+          eb setenv PORT=8080 || true
+
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
-            echo "🚀 Attempt $i to deploy"
+            echo "🚀 Deployment attempt $i"
             if eb deploy ${{ env.EB_ENV_NAME }} --staged --timeout 20; then
               echo "✅ Deployment succeeded on attempt $i"
               break
             else
-              echo "⚠️ Deployment attempt $i failed. Retrying in 15s..."
+              echo "⚠️ Deployment attempt $i failed, retrying in 15s..."
               sleep 15
             fi
           done
 
-      - name: Wait for EB environment health to be Green
+      # ---------------------------
+      # 6️⃣ Wait for EB Environment Health
+      # ---------------------------
+      - name: Wait for EB environment health
         run: |
-          echo "⏳ Checking EB environment health..."
+          echo "⏳ Checking environment health for ${{ env.EB_ENV_NAME }}..."
+          MAX_RETRIES=40
+          SLEEP=15
           SUCCESS=0
-          for i in $(seq 1 ${{ env.MAX_HEALTH_RETRIES }}); do
+          for i in $(seq 1 $MAX_RETRIES); do
             HEALTH=$(eb status ${{ env.EB_ENV_NAME }} | grep "Health:" | awk '{print $2}')
             echo "Attempt $i: Health=$HEALTH"
-            if [ "$HEALTH" = "Green" ]; then
+            if [ "$HEALTH" == "Green" ]; then
               SUCCESS=1
               break
             fi
-            sleep ${{ env.HEALTH_SLEEP }}
+            sleep $SLEEP
           done
           if [ "$SUCCESS" -ne 1 ]; then
-            echo "❌ EB environment health did not become Green"
+            echo "❌ Environment health did not become Green"
             exit 1
           fi
-          echo "✅ EB environment health is Green!"
+          echo "✅ Environment is Green!"
 
-      - name: Run Smoke Test
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { execSync } = require('child_process');
-            const TARGET_URL = execSync(`eb status ${{ env.EB_ENV_NAME }} | grep CNAME | awk '{print $2}'`).toString().trim();
-            process.env.TARGET_URL = `https://${TARGET_URL}`;
-            console.log("Running smoke test against:", process.env.TARGET_URL);
-            let success = false;
-            for (let i = 1; i <= ${{ env.MAX_SMOKE_RETRIES }}; i++) {
-              try {
-                execSync('node scripts/post_deploy_smoke.js', { stdio: 'inherit', env: process.env });
-                console.log(`✅ Smoke test passed on attempt ${i}`);
-                success = true;
-                break;
-              } catch (err) {
-                console.warn(`⚠️ Smoke test failed on attempt ${i}, retrying in ${{ env.SMOKE_SLEEP }}s`);
-                execSync(`sleep ${{ env.SMOKE_SLEEP }}`);
-              }
-            }
-            if (!success) {
-              throw new Error(`❌ Smoke test failed after ${{ env.MAX_SMOKE_RETRIES }} attempts`);
-            }
+      # ---------------------------
+      # 7️⃣ Output EB Environment URL
+      # ---------------------------
+      - name: Output EB environment URL
+        id: env-url
+        run: |
+          URL=$(eb status ${{ env.EB_ENV_NAME }} | grep CNAME | awk '{print $2}')
+          echo "environment-url=https://$URL" >> $GITHUB_OUTPUT
+
+      # ---------------------------
+      # 8️⃣ Optional Smoke Test
+      # ---------------------------
+      - name: Run Post-Deploy Smoke Test
+        if: ${{ github.event.inputs.skip_smoke_tests != 'true' }}
+        env:
+          TARGET_URL: ${{ steps.env-url.outputs.environment-url }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          echo "Running smoke test against $TARGET_URL"
+          node scripts/post_deploy_smoke.js
