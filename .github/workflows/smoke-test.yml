@@ -1,5 +1,6 @@
 name: Post-Deploy Smoke Test
 
+# Trigger manually or after CI pipeline completes
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +11,11 @@ on:
         options:
           - staging
           - production
+
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
 
 permissions:
   id-token: write
@@ -39,42 +45,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check AWS credentials presence
-        id: creds-check
+      - name: Configure AWS Credentials (static)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          echo "🔍 Checking for AWS credentials..."
-          creds=false
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
-            creds=true
+          if [ -n "$AWS_ACCESS_KEY_ID" ]; then
+            echo "Configuring AWS credentials..."
+            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+            aws configure set region "${{ env.AWS_REGION }}"
           fi
-          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
-
-      - name: Configure AWS Credentials
-        if: steps.creds-check.outputs.credentials_present == 'true'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
 
       - name: Determine environment URL
         id: env-url
         run: |
-          if [ "${{ inputs.environment }}" == "staging" ]; then
+          if [ "${{ github.event.inputs.environment }}" == "staging" ]; then
             EB_ENV_NAME=${{ env.STAGING_ENV }}
           else
             EB_ENV_NAME=${{ env.PRODUCTION_ENV }}
           fi
-
           echo "Fetching CNAME for environment: $EB_ENV_NAME"
           CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
-
           if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
-            echo "❌ Could not fetch CNAME for $EB_ENV_NAME"
+            echo "Could not fetch CNAME for $EB_ENV_NAME"
             exit 1
           fi
-
-          echo "✅ Environment URL: https://$CNAME"
           echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
 
       - name: Run smoke script
@@ -83,5 +79,5 @@ jobs:
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
-          echo "🚀 Running smoke test against $TARGET_URL"
+          echo "Running smoke test against $TARGET_URL"
           node scripts/post_deploy_smoke.js
