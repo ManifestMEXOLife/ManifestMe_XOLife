@@ -36,8 +36,7 @@ jobs:
         run: npm ci
 
       - name: Clean build artifacts
-        run: |
-          rm -rf dist coverage || true
+        run: rm -rf dist coverage || true
 
       - name: Generate Prisma client
         run: |
@@ -51,17 +50,19 @@ jobs:
       - name: Build TypeScript
         run: npm run build || npx tsc
 
-      - name: Upload build artifacts
+      - name: Upload build artifacts (exclude invalid paths)
         uses: actions/upload-artifact@v4
         with:
           name: build-files
           path: |
-            dist/
+            dist/**
             package.json
             package-lock.json
-            prisma/
-            .ebextensions/
+            prisma/**
+            .ebextensions/**
             Procfile
+          exclude:
+            - '**/*:*'   # Exclude any file with colon
           retention-days: 7
 
   deploy:
@@ -102,7 +103,7 @@ jobs:
       - name: Create deployment package
         run: |
           cd deploy
-          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json"
+          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
