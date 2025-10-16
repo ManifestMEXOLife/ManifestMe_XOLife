@@ -1,110 +1,131 @@
-build-and-deploy:
-  name: Build & Deploy to ${{ inputs.environment }}
-  runs-on: ubuntu-latest
-  needs: pre-deploy-checks
-  if: always() && (needs.pre-deploy-checks.result == 'success' || inputs.skip_tests)
-  environment: ${{ inputs.environment }}
-  
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+name: Deploy Production Backend
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        default: false
+        type: boolean
 
-    - name: Install dependencies
-      run: npm ci
+permissions:
+  id-token: write
+  contents: read
 
-    - name: Build application
-      run: npm run build || npx tsc
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  EB_APP_NAME: 'manifestme-api'
+  EB_ENV_NAME: 'manifestme-env'
 
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-region: ${{ env.AWS_REGION }}
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
-        audience: sts.amazonaws.com
-        output-env-credentials: true
+jobs:
+  build-and-deploy:
+    name: Build & Deploy to Production
+    runs-on: ubuntu-latest
 
-    - name: Setup Python for EB CLI
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install EB CLI
-      run: pip install --upgrade awsebcli
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-    - name: Wait for EB environment to be Ready
-      run: |
-        ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
-        echo "⏳ Waiting for EB environment $ENV_NAME to be Ready..."
-        MAX_RETRIES=40
-        SLEEP=15
-        SUCCESS=0
-        for i in $(seq 1 $MAX_RETRIES); do
-          STATUS=$(eb status $ENV_NAME | grep "Status:" | awk '{print $2}')
-          echo "Attempt $i: Status=$STATUS"
-          if [ "$STATUS" = "Ready" ]; then
-            SUCCESS=1
-            break
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build || npx tsc
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_OIDC_ROLE_ARN_STAGING }}
+          audience: sts.amazonaws.com
+          output-env-credentials: true
+
+      - name: Setup Python for EB CLI
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install EB CLI
+        run: pip install --upgrade awsebcli
+
+      - name: Wait for EB environment to be Ready
+        run: |
+          ENV_NAME=${{ env.EB_ENV_NAME }}
+          echo "⏳ Waiting for EB environment $ENV_NAME to be Ready..."
+          MAX_RETRIES=40
+          SLEEP=15
+          SUCCESS=0
+          for i in $(seq 1 $MAX_RETRIES); do
+            STATUS=$(eb status $ENV_NAME | grep "Status:" | awk '{print $2}')
+            echo "Attempt $i: Status=$STATUS"
+            if [ "$STATUS" = "Ready" ]; then
+              SUCCESS=1
+              break
+            fi
+            sleep $SLEEP
+          done
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "❌ EB environment not Ready after $((MAX_RETRIES*SLEEP)) seconds"
+            exit 1
           fi
-          sleep $SLEEP
-        done
-        if [ "$SUCCESS" -ne 1 ]; then
-          echo "❌ EB environment not Ready after $((MAX_RETRIES*SLEEP)) seconds"
-          exit 1
-        fi
-        echo "✅ EB environment is Ready!"
+          echo "✅ EB environment is Ready!"
 
-    - name: Create deployment package
-      run: |
-        zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ Procfile -x "*.git*" "node_modules/*" "*.log"
+      - name: Create deployment package
+        run: |
+          zip -r app-${{ github.sha }}.zip dist package.json package-lock.json prisma/ Procfile -x "*.git*" "node_modules/*" "*.log"
 
-    - name: Deploy to Elastic Beanstalk (with retries)
-      run: |
-        ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
-        RETRIES=3
-        for i in $(seq 1 $RETRIES); do
-          echo "🚀 Attempt $i to deploy to $ENV_NAME"
-          if eb deploy $ENV_NAME --staged --timeout 20; then
-            echo "✅ Deployment succeeded on attempt $i"
-            break
-          else
-            echo "⚠️ Deployment attempt $i failed. Retrying in 15s..."
-            sleep 15
+      - name: Deploy to Elastic Beanstalk (with retries)
+        run: |
+          ENV_NAME=${{ env.EB_ENV_NAME }}
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "🚀 Attempt $i to deploy to $ENV_NAME"
+            if eb deploy $ENV_NAME --staged --timeout 20; then
+              echo "✅ Deployment succeeded on attempt $i"
+              break
+            else
+              echo "⚠️ Deployment attempt $i failed. Retrying in 15s..."
+              sleep 15
+            fi
+          done
+
+      - name: Wait for EB environment health to be Green
+        run: |
+          ENV_NAME=${{ env.EB_ENV_NAME }}
+          echo "⏳ Checking EB environment health for $ENV_NAME..."
+          MAX_RETRIES=40
+          SLEEP=15
+          SUCCESS=0
+          for i in $(seq 1 $MAX_RETRIES); do
+            HEALTH=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
+            echo "Attempt $i: Health=$HEALTH"
+            if [ "$HEALTH" = "Green" ]; then
+              SUCCESS=1
+              break
+            fi
+            sleep $SLEEP
+          done
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "❌ EB environment health did not become Green after $((MAX_RETRIES*SLEEP)) seconds"
+            exit 1
           fi
-        done
+          echo "✅ EB environment health is Green!"
 
-    - name: Wait for EB environment health to be Green
-      run: |
-        ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
-        echo "⏳ Checking EB environment health for $ENV_NAME..."
-        MAX_RETRIES=40
-        SLEEP=15
-        SUCCESS=0
-        for i in $(seq 1 $MAX_RETRIES); do
-          HEALTH=$(eb status $ENV_NAME | grep "Health:" | awk '{print $2}')
-          echo "Attempt $i: Health=$HEALTH"
-          if [ "$HEALTH" = "Green" ]; then
-            SUCCESS=1
-            break
-          fi
-          sleep $SLEEP
-        done
-        if [ "$SUCCESS" -ne 1 ]; then
-          echo "❌ EB environment health did not become Green after $((MAX_RETRIES*SLEEP)) seconds"
-          exit 1
-        fi
-        echo "✅ EB environment health is Green!"
-
-    - name: Output EB environment URL
-      id: env-url
-      run: |
-        ENV_NAME=${{ secrets.EB_ENV_NAME || 'manifestme-env' }}
-        URL=$(eb status $ENV_NAME | grep CNAME | awk '{print $2}')
-        echo "environment-url=https://$URL" >> $GITHUB_OUTPUT
+      - name: Output EB environment URL
+        id: env-url
+        run: |
+          ENV_NAME=${{ env.EB_ENV_NAME }}
+          URL=$(eb status $ENV_NAME | grep CNAME | awk '{print $2}')
+          echo "environment-url=https://$URL" >> $GITHUB_OUTPUT
