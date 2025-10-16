@@ -14,7 +14,7 @@ jobs:
       NODE_VERSION: '22'
       EB_APP_NAME: "manifestme-api"
       EB_ENV_NAME: "manifestme-env"
-      EB_URL: "http://your-eb-url.us-east-1.elasticbeanstalk.com" # Replace with your actual EB URL
+      EB_URL: "http://manifestme-env.eba-xyz123.us-east-1.elasticbeanstalk.com" # ⬅️ Replace with your actual EB environment URL
 
     steps:
       # 1️⃣ Checkout repo
@@ -39,7 +39,7 @@ jobs:
       - name: Zip project
         run: zip -r manifestme-backend.zip . -x "*.git*" "node_modules/*" "*.github/*" "*.env" "*.DS_Store"
 
-      # 6️⃣ Configure AWS credentials (fixed)
+      # 6️⃣ Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -82,11 +82,11 @@ jobs:
           done
           echo "Environment is ready!"
 
-      # 9️⃣ Test deployed API endpoint
+      # 9️⃣ Simplified and hardened API test
       - name: Test API endpoint
         run: |
-          echo "Testing / endpoint..."
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.EB_URL }}/)
+          echo "Testing API endpoint..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://manifestme-env.eba-xyz123.us-east-1.elasticbeanstalk.com/)
           if [ "$STATUS_CODE" -ne 200 ]; then
             echo "API test failed! Status code: $STATUS_CODE"
             exit 1
