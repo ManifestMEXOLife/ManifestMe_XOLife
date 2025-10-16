@@ -1,30 +1,61 @@
-- name: Delete old artifacts
-  uses: actions/github-script@v8
-  with:
-    script: |
-      const { github, context } = require('@actions/github');
-      const perPage = 100;
-      let page = 1;
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 30);
+name: Cleanup Old Artifacts
 
-      while (true) {
-        const artifacts = await github.rest.actions.listArtifactsForRepo({
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          per_page: perPage,
-          page
-        });
-        if (artifacts.data.artifacts.length === 0) break;
-        for (const artifact of artifacts.data.artifacts) {
-          if (new Date(artifact.created_at) < cutoff) {
-            await github.rest.actions.deleteArtifact({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              artifact_id: artifact.id
-            });
-            console.log(`Deleted artifact: ${artifact.name}`);
-          }
-        }
-        page++;
-      }
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Runs every Sunday at midnight
+
+jobs:
+  cleanup:
+    name: Delete old artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Delete old artifacts
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const cutoffDays = 30;
+            const { github, context } = require('@actions/github');
+            const perPage = 100;
+            let page = 1;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - cutoffDays);
+            console.log(`Deleting artifacts older than ${cutoffDays} days (${cutoff.toISOString()})`);
+            
+            while (true) {
+              const artifacts = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: perPage,
+                page
+              });
+              
+              if (artifacts.data.artifacts.length === 0) {
+                console.log('No more artifacts to check.');
+                break;
+              }
+
+              for (const artifact of artifacts.data.artifacts) {
+                if (new Date(artifact.created_at) < cutoff) {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  console.log(`🗑️ Deleted artifact: ${artifact.name} (${artifact.created_at})`);
+                }
+              }
+
+              if (artifacts.data.artifacts.length < perPage) {
+                console.log('Reached the end of artifact list.');
+                break;
+              }
+
+              page++;
+            }
+
+            console.log('Cleanup complete.');
