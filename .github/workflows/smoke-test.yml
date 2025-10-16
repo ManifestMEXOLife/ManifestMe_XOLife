@@ -38,6 +38,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ---------------------------
+      # 1️⃣ Checkout code
+      # ---------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -49,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ---------------------------
+      # 2️⃣ Configure AWS Credentials
+      # ---------------------------
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -56,6 +62,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ---------------------------
+      # 3️⃣ Determine Environment URL
+      # ---------------------------
       - name: Determine Environment URL
         id: env-url
         run: |
@@ -79,28 +88,32 @@ jobs:
           echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
           echo "Environment URL: https://$CNAME"
 
+      # ---------------------------
+      # 4️⃣ Wait for Environment to be Healthy (Retry-Friendly)
+      # ---------------------------
       - name: Wait for Environment to be Healthy
         run: |
-          if [ "${{ github.event.inputs.environment }}" == "staging" ]; then
-            EB_ENV_NAME=${{ env.STAGING_ENV }}
-          else
-            EB_ENV_NAME=${{ env.PRODUCTION_ENV }}
-          fi
-
-          echo "Waiting for $EB_ENV_NAME to become healthy..."
+          EB_ENV_NAME="${{ github.event.inputs.environment == 'staging' && env.STAGING_ENV || env.PRODUCTION_ENV }}"
+          echo "⏳ Waiting for $EB_ENV_NAME to become healthy..."
           SUCCESS=0
+
           for i in $(seq 1 ${{ env.MAX_HEALTH_RETRIES }}); do
             STATUS=$(aws elasticbeanstalk describe-environments \
               --environment-names "$EB_ENV_NAME" \
               --query 'Environments[0].Health' \
               --output text)
             echo "Attempt $i: Environment health = $STATUS"
+
             if [ "$STATUS" == "Green" ]; then
               echo "✅ Environment is healthy!"
               SUCCESS=1
               break
             fi
-            sleep ${{ env.HEALTH_SLEEP }}
+
+            # Exponential backoff to avoid hammering AWS API
+            SLEEP_TIME=$(( ${{ env.HEALTH_SLEEP }} * i ))
+            echo "⏳ Sleeping $SLEEP_TIME seconds before next health check..."
+            sleep $SLEEP_TIME
           done
 
           if [ "$SUCCESS" -ne 1 ]; then
@@ -108,14 +121,18 @@ jobs:
             exit 1
           fi
 
+      # ---------------------------
+      # 5️⃣ Run Smoke Test with Retries
+      # ---------------------------
       - name: Run Smoke Test
         env:
           TARGET_URL: ${{ env.TARGET_URL }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
-          echo "Running smoke test against $TARGET_URL"
+          echo "🏁 Starting smoke test against $TARGET_URL"
           SUCCESS=0
+
           for i in $(seq 1 ${{ env.MAX_SMOKE_RETRIES }}); do
             if node scripts/post_deploy_smoke.js; then
               echo "✅ Smoke test passed on attempt $i"
