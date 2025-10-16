@@ -12,10 +12,9 @@ jobs:
 
     env:
       NODE_VERSION: '22'
-      AWS_REGION: ${{ secrets.AWS_REGION }}
       EB_APP_NAME: "manifestme-api"
       EB_ENV_NAME: "manifestme-env"
-      EB_URL: "http://your-eb-url.us-east-1.elasticbeanstalk.com" # Replace with your EB URL
+      EB_URL: "http://your-eb-url.us-east-1.elasticbeanstalk.com" # Replace with your actual EB URL
 
     steps:
       # 1️⃣ Checkout repo
@@ -36,26 +35,31 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      # 5️⃣ Zip project for EB
+      # 5️⃣ Zip project for Elastic Beanstalk
       - name: Zip project
-        run: zip -r manifestme-backend.zip . -x "*.git*" "node_modules/*" "*.github/*"
+        run: zip -r manifestme-backend.zip . -x "*.git*" "node_modules/*" "*.github/*" "*.env" "*.DS_Store"
 
-      # 6️⃣ Configure AWS credentials
+      # 6️⃣ Configure AWS credentials (fixed)
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      # 7️⃣ Upload zip to S3 & deploy EB
+      # 7️⃣ Upload zip to S3 & deploy to Elastic Beanstalk
       - name: Deploy to Elastic Beanstalk
         run: |
+          echo "Uploading ZIP to S3..."
           aws s3 cp manifestme-backend.zip s3://${{ secrets.S3_BUCKET }}/manifestme-backend.zip
+
+          echo "Creating new application version..."
           aws elasticbeanstalk create-application-version \
             --application-name ${{ env.EB_APP_NAME }} \
             --version-label github-${{ github.run_id }} \
             --source-bundle S3Bucket=${{ secrets.S3_BUCKET }},S3Key=manifestme-backend.zip
+
+          echo "Updating environment..."
           aws elasticbeanstalk update-environment \
             --environment-name ${{ env.EB_ENV_NAME }} \
             --version-label github-${{ github.run_id }}
@@ -63,8 +67,20 @@ jobs:
       # 8️⃣ Wait for EB environment to finish updating
       - name: Wait for EB deployment
         run: |
-          echo "Waiting 60 seconds for environment to stabilize..."
-          sleep 60
+          echo "Waiting for environment to stabilize..."
+          STATUS=""
+          while [ "$STATUS" != "Ready" ]; do
+            STATUS=$(aws elasticbeanstalk describe-environments \
+                      --environment-names ${{ env.EB_ENV_NAME }} \
+                      --query "Environments[0].Status" \
+                      --output text)
+            echo "Current status: $STATUS"
+            if [ "$STATUS" == "Ready" ]; then
+              break
+            fi
+            sleep 15
+          done
+          echo "Environment is ready!"
 
       # 9️⃣ Test deployed API endpoint
       - name: Test API endpoint
