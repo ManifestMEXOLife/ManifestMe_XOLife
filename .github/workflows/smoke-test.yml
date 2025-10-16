@@ -39,8 +39,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure AWS Credentials (static)
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+      - name: Check AWS credentials presence
+        id: creds-check
+        run: |
+          echo "🔍 Checking for AWS credentials..."
+          creds=false
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            creds=true
+          fi
+          echo "credentials_present=$creds" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        if: steps.creds-check.outputs.credentials_present == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -55,13 +65,16 @@ jobs:
           else
             EB_ENV_NAME=${{ env.PRODUCTION_ENV }}
           fi
+
           echo "Fetching CNAME for environment: $EB_ENV_NAME"
           CNAME=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV_NAME" --query 'Environments[0].CNAME' --output text)
+
           if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
-            echo "Could not fetch CNAME for $EB_ENV_NAME"
+            echo "❌ Could not fetch CNAME for $EB_ENV_NAME"
             exit 1
           fi
-          echo "Environment URL: https://$CNAME"
+
+          echo "✅ Environment URL: https://$CNAME"
           echo "TARGET_URL=https://$CNAME" >> $GITHUB_ENV
 
       - name: Run smoke script
@@ -70,5 +83,5 @@ jobs:
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: |
-          echo "Running smoke test against $TARGET_URL"
+          echo "🚀 Running smoke test against $TARGET_URL"
           node scripts/post_deploy_smoke.js
