@@ -1,0 +1,40 @@
+name: Deploy React Frontend to S3
+
+on:
+  push:
+    branches:
+      - main  # Trigger deployment on main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          cd manifest-frontend
+          npm install
+
+      - name: Build frontend
+        run: |
+          cd manifest-frontend
+          npm run build
+
+      - name: Deploy to S3
+        uses: aws-actions/s3-sync@v2
+        with:
+          bucket: manifestme-frontend
+          region: us-east-1
+          source: manifest-frontend/build   # Use 'dist' if using Vite
+          delete: true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
