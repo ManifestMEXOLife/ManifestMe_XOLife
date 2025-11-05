@@ -19,15 +19,27 @@ interface Task {
 function App() {
   const [healthStatus, setHealthStatus] = useState("Checking backend...");
   const [token, setToken] = useState<string | null>(localStorage.getItem("jwtToken"));
+
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Health check
+  const [newUser, setNewUser] = useState({ name: "", email: "" });
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+
+  const [newTask, setNewTask] = useState({ title: "", description: "" });
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+
+  // Initial backend health check
   useEffect(() => {
     checkBackendHealth();
-  }, []);
+    if (token) {
+      fetchUsers();
+      fetchTasks();
+    }
+  }, [token]);
 
   const checkBackendHealth = async () => {
     try {
@@ -38,7 +50,7 @@ function App() {
     }
   };
 
-  // Login handler
+  // --- Auth ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -53,34 +65,114 @@ function App() {
     }
   };
 
-  // Fetch users
-  const fetchUsers = async (authToken?: string) => {
-    if (!authToken && !token) return;
+  const handleLogout = () => {
+    setToken(null);
+    localStorage.removeItem("jwtToken");
+    setUsers([]);
+    setTasks([]);
+  };
+
+  // --- Users ---
+  const fetchUsers = async () => {
+    if (!token) return;
     try {
-      const data = await Api.getUsers(authToken || token!);
+      const data = await Api.getUsers(token);
       setUsers(data);
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Fetch tasks
-  const fetchTasks = async (authToken?: string) => {
-    if (!authToken && !token) return;
+  const handleAddUser = async () => {
+    if (!token) return;
     try {
-      const data = await Api.getTasks(authToken || token!);
+      await Api.createUser(newUser, token);
+      setNewUser({ name: "", email: "" });
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateUser = async () => {
+    if (!token || editingUserId === null) return;
+    try {
+      await Api.updateUser(editingUserId, newUser, token);
+      setEditingUserId(null);
+      setNewUser({ name: "", email: "" });
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteUser = async (id: number) => {
+    if (!token) return;
+    try {
+      await Api.deleteUser(id, token);
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const startEditUser = (user: User) => {
+    setEditingUserId(user.id);
+    setNewUser({ name: user.name, email: user.email });
+  };
+
+  // --- Tasks ---
+  const fetchTasks = async () => {
+    if (!token) return;
+    try {
+      const data = await Api.getTasks(token);
       setTasks(data);
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Logout
-  const handleLogout = () => {
-    setToken(null);
-    localStorage.removeItem("jwtToken");
-    setUsers([]);
-    setTasks([]);
+  const handleAddTask = async () => {
+    if (!token) return;
+    try {
+      await Api.createTask(newTask, token);
+      setNewTask({ title: "", description: "" });
+      fetchTasks();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateTask = async () => {
+    if (!token || editingTaskId === null) return;
+    try {
+      await Api.updateTask(editingTaskId, newTask, token);
+      setEditingTaskId(null);
+      setNewTask({ title: "", description: "" });
+      fetchTasks();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteTask = async (id: number) => {
+    if (!token) return;
+    try {
+      await Api.deleteTask(id, token);
+      fetchTasks();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const toggleTaskComplete = async (task: Task) => {
+    if (!token) return;
+    try {
+      await Api.updateTask(task.id, { ...task, completed: !task.completed }, token);
+      fetchTasks();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -119,23 +211,78 @@ function App() {
         <div style={{ marginTop: "2rem" }}>
           <button onClick={handleLogout}>Logout</button>
 
+          {/* --- Users Section --- */}
           <div style={{ marginTop: "1rem" }}>
             <h3>Users</h3>
+            <input
+              type="text"
+              placeholder="Name"
+              value={newUser.name}
+              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+              style={{ marginRight: 8 }}
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={newUser.email}
+              onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+              style={{ marginRight: 8 }}
+            />
+            {editingUserId ? (
+              <button onClick={handleUpdateUser}>Update User</button>
+            ) : (
+              <button onClick={handleAddUser}>Add User</button>
+            )}
             <ul>
               {users.map((user) => (
                 <li key={user.id}>
-                  {user.name} ({user.email})
+                  {user.name} ({user.email}){" "}
+                  <button onClick={() => startEditUser(user)}>Edit</button>{" "}
+                  <button onClick={() => handleDeleteUser(user.id)}>Delete</button>
                 </li>
               ))}
             </ul>
           </div>
 
+          {/* --- Tasks Section --- */}
           <div style={{ marginTop: "1rem" }}>
             <h3>Tasks</h3>
+            <input
+              type="text"
+              placeholder="Title"
+              value={newTask.title}
+              onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+              style={{ marginRight: 8 }}
+            />
+            <input
+              type="text"
+              placeholder="Description"
+              value={newTask.description}
+              onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+              style={{ marginRight: 8 }}
+            />
+            {editingTaskId ? (
+              <button onClick={handleUpdateTask}>Update Task</button>
+            ) : (
+              <button onClick={handleAddTask}>Add Task</button>
+            )}
             <ul>
               {tasks.map((task) => (
                 <li key={task.id}>
-                  {task.title} - {task.completed ? "✅" : "❌"}
+                  <span
+                    style={{
+                      textDecoration: task.completed ? "line-through" : "none",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => toggleTaskComplete(task)}
+                  >
+                    {task.title} - {task.completed ? "✅" : "❌"}
+                  </span>{" "}
+                  <button onClick={() => {
+                    setEditingTaskId(task.id);
+                    setNewTask({ title: task.title, description: task.description || "" });
+                  }}>Edit</button>{" "}
+                  <button onClick={() => handleDeleteTask(task.id)}>Delete</button>
                 </li>
               ))}
             </ul>
