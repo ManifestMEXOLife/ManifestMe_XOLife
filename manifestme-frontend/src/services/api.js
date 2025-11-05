@@ -2,14 +2,14 @@
 
 /**
  * API Service for ManifestMe Frontend
- * Handles all calls to the backend.
+ * Handles calls to backend with optional JWT authentication.
  * Automatically switches between local and production backend.
  */
 
 const LOCAL_URL = "http://localhost:8080"; // local backend
-const PROD_URL = "https://manifestme-env.eba-xyz123.us-east-1.elasticbeanstalk.com"; // deployed backend
+const PROD_URL = "https://manifestme-env.eba-xyz123.us-east-1.elasticbeanstalk.com"; // production backend
 
-// Use .env variable if set; otherwise, auto-switch based on NODE_ENV
+// Use .env variable if set; otherwise auto-switch based on NODE_ENV
 const API_BASE_URL =
   process.env.REACT_APP_API_URL ||
   (process.env.NODE_ENV === "development" ? LOCAL_URL : PROD_URL);
@@ -19,13 +19,18 @@ const API_BASE_URL =
  * @param {string} endpoint - API endpoint (e.g., "/users")
  * @param {string} method - HTTP method ("GET", "POST", etc.)
  * @param {object|null} body - JSON body for POST/PUT requests
+ * @param {string|null} token - Optional JWT token
  */
-async function apiRequest(endpoint, method = "GET", body = null) {
+async function apiRequest(endpoint, method = "GET", body = null, token = null) {
   const url = endpoint.startsWith("/") ? `${API_BASE_URL}${endpoint}` : `${API_BASE_URL}/${endpoint}`;
 
   const headers = {
     "Content-Type": "application/json",
   };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
 
   const options = { method, headers };
   if (body) options.body = JSON.stringify(body);
@@ -38,7 +43,8 @@ async function apiRequest(endpoint, method = "GET", body = null) {
       throw new Error(`API error: ${response.status} - ${text}`);
     }
 
-    return await response.json();
+    // Try to parse JSON, if any
+    return response.status === 204 ? null : await response.json();
   } catch (error) {
     console.error("API Request failed:", error);
     throw error;
@@ -47,22 +53,26 @@ async function apiRequest(endpoint, method = "GET", body = null) {
 
 /**
  * API Endpoint Wrappers
- * Add more endpoints as your app grows
  */
 export const Api = {
-  // Health check endpoint
+  // Health check
   getHealth: () => apiRequest("/health"),
 
-  // Users endpoints
-  getUsers: () => apiRequest("/users"),
-  getUserById: (id) => apiRequest(`/users/${id}`),
-  createUser: (userData) => apiRequest("/users", "POST", userData),
-  updateUser: (id, userData) => apiRequest(`/users/${id}`, "PUT", userData),
-  deleteUser: (id) => apiRequest(`/users/${id}`, "DELETE"),
+  // Authentication
+  login: (credentials) => apiRequest("/auth/login", "POST", credentials), // expects { username, password }
 
-  // Example for other endpoints
-  getTasks: () => apiRequest("/tasks"),
-  createTask: (taskData) => apiRequest("/tasks", "POST", taskData),
+  // Users
+  getUsers: (token) => apiRequest("/users", "GET", null, token),
+  getUserById: (id, token) => apiRequest(`/users/${id}`, "GET", null, token),
+  createUser: (userData, token) => apiRequest("/users", "POST", userData, token),
+  updateUser: (id, userData, token) => apiRequest(`/users/${id}`, "PUT", userData, token),
+  deleteUser: (id, token) => apiRequest(`/users/${id}`, "DELETE", null, token),
+
+  // Tasks
+  getTasks: (token) => apiRequest("/tasks", "GET", null, token),
+  createTask: (taskData, token) => apiRequest("/tasks", "POST", taskData, token),
+  updateTask: (id, taskData, token) => apiRequest(`/tasks/${id}`, "PUT", taskData, token),
+  deleteTask: (id, token) => apiRequest(`/tasks/${id}`, "DELETE", null, token),
 };
 
 export default Api;
