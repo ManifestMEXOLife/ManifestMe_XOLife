@@ -16,34 +16,31 @@ interface Task {
 
 const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const apiBaseUrl =
-    process.env.REACT_APP_API_URL || "http://localhost:8080";
+  const apiBaseUrl = process.env.REACT_APP_API_URL || "http://localhost:8080";
 
   useEffect(() => {
-    // ✅ Connect to Socket.IO backend
     const socket = io(apiBaseUrl, { transports: ["websocket"] });
 
     socket.on("connect", () => {
-      console.log("Connected to backend via Socket.IO ✅");
+      console.log("✅ Connected to backend via Socket.IO");
       toast.info("Connected to backend!");
     });
 
     socket.on("notification", (data: Notification) => {
-      console.log("Notification received:", data);
+      console.log("📩 Notification received:", data);
       toast[data.type || "info"](data.message);
     });
 
     socket.on("disconnect", () => {
-      console.warn("Disconnected from backend ❌");
+      console.warn("⚠️ Disconnected from backend");
       toast.warn("Disconnected from backend");
     });
 
-    // ✅ Fetch tasks from the backend REST API
     fetch(`${apiBaseUrl}/api/tasks`)
       .then((res) => res.json())
       .then((data) => {
         setTasks(data);
-        console.log("Loaded tasks:", data);
+        console.log("📋 Loaded tasks:", data);
       })
       .catch((err) => {
         console.error("Error loading tasks:", err);
@@ -58,7 +55,9 @@ const App: React.FC = () => {
   return (
     <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
       <h1>📋 ManifestMe Dashboard</h1>
-      <p>Connected to: <b>{apiBaseUrl}</b></p>
+      <p>
+        Connected to: <b>{apiBaseUrl}</b>
+      </p>
 
       <h2>Tasks</h2>
       {tasks.length === 0 ? (
