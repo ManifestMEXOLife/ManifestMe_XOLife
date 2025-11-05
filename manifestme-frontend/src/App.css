@@ -1,38 +1,119 @@
-.App {
-  text-align: center;
+/* General body styling */
+body {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f9f9f9;
+  color: #333;
+  margin: 0;
+  padding: 0;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* Container for the app */
+div {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+/* Card styling */
+.card {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+  margin-bottom: 1.5rem;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+/* Section titles */
+h1 {
+  font-size: 2.2rem;
+  margin-bottom: 1rem;
+  color: #222;
+}
+
+h3 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+  color: #555;
+}
+
+/* Inputs and buttons */
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  padding: 0.5rem 0.8rem;
+  margin-right: 0.5rem;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  outline: none;
+  transition: 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  border-color: #4caf50;
+}
+
+/* Buttons */
+button {
+  padding: 0.5rem 1rem;
+  margin-right: 0.5rem;
+  background-color: #4caf50;
+  border: none;
+  border-radius: 5px;
   color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
-.App-link {
-  color: #61dafb;
+button:hover {
+  background-color: #45a049;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+/* List styling */
+ul {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+li {
+  padding: 0.5rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+li span {
+  cursor: pointer;
+}
+
+li button {
+  margin-left: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* Health status box */
+.health {
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  margin-bottom: 1.5rem;
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"] {
+    margin-bottom: 0.5rem;
+    width: 100%;
   }
-  to {
-    transform: rotate(360deg);
+
+  button {
+    margin-bottom: 0.5rem;
+    width: 100%;
   }
 }
