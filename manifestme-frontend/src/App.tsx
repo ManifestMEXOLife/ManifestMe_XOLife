@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
-import Api from "./api"; // Your API service layer
-import Notification from "./components/Notification";
-import "./App.css";
+import React, { useEffect, useState } from "react";
+import api from "./api";
+import { io } from "socket.io-client";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 interface User {
   id: string;
@@ -15,178 +16,127 @@ interface Task {
   completed: boolean;
 }
 
-function App() {
+const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [newUser, setNewUser] = useState({ name: "", email: "" });
-  const [newTask, setNewTask] = useState({ title: "" });
+  const [newTaskTitle, setNewTaskTitle] = useState("");
 
-  // Notifications
-  const [notifications, setNotifications] = useState<
-    { id: number; message: string; type?: "success" | "error" | "info" }[]
-  >([]);
-
-  const addNotification = (message: string, type?: "success" | "error" | "info") => {
-    const id = Date.now();
-    setNotifications((prev) => [...prev, { id, message, type }]);
-  };
-
-  // Fetch users and tasks
-  const fetchUsers = async () => {
+  // ---------------- Load initial data ----------------
+  const loadUsers = async () => {
     try {
-      const data = await Api.getUsers();
+      const data = await api.getUsers();
       setUsers(data);
     } catch (err) {
-      addNotification("Failed to fetch users.", "error");
-      console.error(err);
+      toast.error("Failed to load users");
     }
   };
 
-  const fetchTasks = async () => {
+  const loadTasks = async () => {
     try {
-      const data = await Api.getTasks();
+      const data = await api.getTasks();
       setTasks(data);
     } catch (err) {
-      addNotification("Failed to fetch tasks.", "error");
-      console.error(err);
+      toast.error("Failed to load tasks");
     }
   };
 
+  // ---------------- Socket.IO ----------------
   useEffect(() => {
-    fetchUsers();
-    fetchTasks();
+    const socket = io(process.env.REACT_APP_API_URL);
+
+    socket.on("notification", (data: { message: string; type?: string }) => {
+      const type = data.type || "info";
+      switch (type) {
+        case "success":
+          toast.success(data.message);
+          break;
+        case "error":
+          toast.error(data.message);
+          break;
+        default:
+          toast.info(data.message);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
-  // User CRUD
-  const handleAddUser = async () => {
-    try {
-      await Api.createUser(newUser);
-      setNewUser({ name: "", email: "" });
-      fetchUsers();
-      addNotification("User added successfully!", "success");
-    } catch (err) {
-      addNotification("Failed to add user.", "error");
-      console.error(err);
-    }
-  };
+  useEffect(() => {
+    loadUsers();
+    loadTasks();
+  }, []);
 
-  const handleDeleteUser = async (id: string) => {
-    try {
-      await Api.deleteUser(id);
-      fetchUsers();
-      addNotification("User deleted successfully.", "info");
-    } catch (err) {
-      addNotification("Failed to delete user.", "error");
-      console.error(err);
-    }
-  };
-
-  // Task CRUD
+  // ---------------- Task actions ----------------
   const handleAddTask = async () => {
+    if (!newTaskTitle) return;
     try {
-      await Api.createTask(newTask);
-      setNewTask({ title: "" });
-      fetchTasks();
-      addNotification("Task added successfully!", "success");
+      const newTask = await api.createTask({ title: newTaskTitle });
+      setTasks((prev) => [...prev, newTask]);
+      setNewTaskTitle("");
     } catch (err) {
-      addNotification("Failed to add task.", "error");
-      console.error(err);
+      toast.error("Failed to create task");
     }
   };
 
   const handleToggleTask = async (task: Task) => {
     try {
-      await Api.updateTask(task.id, { completed: !task.completed });
-      fetchTasks();
-      addNotification(
-        `Task "${task.title}" marked ${task.completed ? "incomplete" : "complete"}!`,
-        "info"
-      );
+      const updated = await api.updateTask(task.id, { completed: !task.completed });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (err) {
-      addNotification("Failed to update task.", "error");
-      console.error(err);
+      toast.error("Failed to update task");
     }
   };
 
-  const handleDeleteTask = async (id: string) => {
+  const handleDeleteTask = async (taskId: string) => {
     try {
-      await Api.deleteTask(id);
-      fetchTasks();
-      addNotification("Task deleted successfully.", "info");
+      await api.deleteTask(taskId);
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
     } catch (err) {
-      addNotification("Failed to delete task.", "error");
-      console.error(err);
+      toast.error("Failed to delete task");
     }
   };
 
+  // ---------------- Render ----------------
   return (
-    <div>
-      <h1>ManifestMe Dashboard</h1>
+    <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
+      <h1>ManifestMe Tasks</h1>
 
-      {/* Users Section */}
-      <div className="card">
-        <h3>Users</h3>
+      <div style={{ marginBottom: "1rem" }}>
         <input
           type="text"
-          placeholder="Name"
-          value={newUser.name}
-          onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+          value={newTaskTitle}
+          onChange={(e) => setNewTaskTitle(e.target.value)}
+          placeholder="New task title"
         />
-        <input
-          type="email"
-          placeholder="Email"
-          value={newUser.email}
-          onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-        />
-        <button onClick={handleAddUser}>Add User</button>
-        <ul>
-          {users.map((user) => (
-            <li key={user.id}>
-              {user.name} ({user.email})
-              <button onClick={() => handleDeleteUser(user.id)}>Delete</button>
-            </li>
-          ))}
-        </ul>
+        <button onClick={handleAddTask} style={{ marginLeft: "0.5rem" }}>
+          Add Task
+        </button>
       </div>
 
-      {/* Tasks Section */}
-      <div className="card">
-        <h3>Tasks</h3>
-        <input
-          type="text"
-          placeholder="New Task"
-          value={newTask.title}
-          onChange={(e) => setNewTask({ title: e.target.value })}
-        />
-        <button onClick={handleAddTask}>Add Task</button>
-        <ul>
-          {tasks.map((task) => (
-            <li key={task.id}>
-              <span
-                style={{ textDecoration: task.completed ? "line-through" : "none", cursor: "pointer" }}
-                onClick={() => handleToggleTask(task)}
-              >
-                {task.title}
-              </span>
-              <button onClick={() => handleDeleteTask(task.id)}>Delete</button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ul>
+        {tasks.map((task) => (
+          <li key={task.id} style={{ marginBottom: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={task.completed}
+              onChange={() => handleToggleTask(task)}
+            />
+            <span style={{ marginLeft: "0.5rem" }}>{task.title}</span>
+            <button
+              onClick={() => handleDeleteTask(task.id)}
+              style={{ marginLeft: "1rem", color: "red" }}
+            >
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
 
-      {/* Notifications */}
-      {notifications.map((notif) => (
-        <Notification
-          key={notif.id}
-          message={notif.message}
-          type={notif.type}
-          onClose={() =>
-            setNotifications((prev) => prev.filter((n) => n.id !== notif.id))
-          }
-        />
-      ))}
+      <ToastContainer position="top-right" autoClose={3000} />
     </div>
   );
-}
+};
 
 export default App;
