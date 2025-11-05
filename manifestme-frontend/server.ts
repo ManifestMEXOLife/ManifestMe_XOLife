@@ -1,11 +1,14 @@
 import express from "express";
+import cors from "cors";
+
 const app = express();
-const port = 8080;
 
-app.get("/health", (req, res) => {
-  res.json({ message: "Backend is healthy ✅" });
-});
+// Allow requests from frontend
+app.use(
+  cors({
+    origin: ["http://localhost:3000", "http://manifestme-env.eba-62aeuny5.us-east-1.elasticbeanstalk.com"],
+    credentials: true,
+  })
+);
 
-app.listen(port, () => {
-  console.log(`Server listening on 0.0.0.0:${port}`);
-});
+app.use(express.json());
