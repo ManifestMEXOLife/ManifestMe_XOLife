@@ -7,12 +7,10 @@
  */
 
 const LOCAL_URL = "http://localhost:8080"; // local backend
-const PROD_URL = "https://manifestme-env.eba-xyz123.us-east-1.elasticbeanstalk.com"; // production backend
+const PROD_URL = process.env.REACT_APP_API_URL_PROD; // production backend from .env
 
-// Use .env variable if set; otherwise auto-switch based on NODE_ENV
 const API_BASE_URL =
-  process.env.REACT_APP_API_URL ||
-  (process.env.NODE_ENV === "development" ? LOCAL_URL : PROD_URL);
+  process.env.NODE_ENV === "development" ? LOCAL_URL : PROD_URL;
 
 /**
  * Generic API request helper
