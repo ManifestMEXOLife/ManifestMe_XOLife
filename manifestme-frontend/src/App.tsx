@@ -1,140 +1,79 @@
 import React, { useEffect, useState } from "react";
-import api from "./api";
 import { io } from "socket.io-client";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
+interface Notification {
+  message: string;
+  type: "success" | "info" | "warning" | "error";
 }
 
 interface Task {
-  id: string;
+  id: number;
   title: string;
-  completed: boolean;
+  description: string;
 }
 
 const App: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const apiBaseUrl =
+    process.env.REACT_APP_API_URL || "http://localhost:8080";
 
-  // ---------------- Load initial data ----------------
-  const loadUsers = async () => {
-    try {
-      const data = await api.getUsers();
-      setUsers(data);
-    } catch (err) {
-      toast.error("Failed to load users");
-    }
-  };
-
-  const loadTasks = async () => {
-    try {
-      const data = await api.getTasks();
-      setTasks(data);
-    } catch (err) {
-      toast.error("Failed to load tasks");
-    }
-  };
-
-  // ---------------- Socket.IO ----------------
   useEffect(() => {
-    const socket = io(process.env.REACT_APP_API_URL);
+    // ✅ Connect to Socket.IO backend
+    const socket = io(apiBaseUrl, { transports: ["websocket"] });
 
-    socket.on("notification", (data: { message: string; type?: string }) => {
-      const type = data.type || "info";
-      switch (type) {
-        case "success":
-          toast.success(data.message);
-          break;
-        case "error":
-          toast.error(data.message);
-          break;
-        default:
-          toast.info(data.message);
-      }
+    socket.on("connect", () => {
+      console.log("Connected to backend via Socket.IO ✅");
+      toast.info("Connected to backend!");
     });
+
+    socket.on("notification", (data: Notification) => {
+      console.log("Notification received:", data);
+      toast[data.type || "info"](data.message);
+    });
+
+    socket.on("disconnect", () => {
+      console.warn("Disconnected from backend ❌");
+      toast.warn("Disconnected from backend");
+    });
+
+    // ✅ Fetch tasks from the backend REST API
+    fetch(`${apiBaseUrl}/api/tasks`)
+      .then((res) => res.json())
+      .then((data) => {
+        setTasks(data);
+        console.log("Loaded tasks:", data);
+      })
+      .catch((err) => {
+        console.error("Error loading tasks:", err);
+        toast.error("Failed to load tasks");
+      });
 
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [apiBaseUrl]);
 
-  useEffect(() => {
-    loadUsers();
-    loadTasks();
-  }, []);
-
-  // ---------------- Task actions ----------------
-  const handleAddTask = async () => {
-    if (!newTaskTitle) return;
-    try {
-      const newTask = await api.createTask({ title: newTaskTitle });
-      setTasks((prev) => [...prev, newTask]);
-      setNewTaskTitle("");
-    } catch (err) {
-      toast.error("Failed to create task");
-    }
-  };
-
-  const handleToggleTask = async (task: Task) => {
-    try {
-      const updated = await api.updateTask(task.id, { completed: !task.completed });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    } catch (err) {
-      toast.error("Failed to update task");
-    }
-  };
-
-  const handleDeleteTask = async (taskId: string) => {
-    try {
-      await api.deleteTask(taskId);
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
-    } catch (err) {
-      toast.error("Failed to delete task");
-    }
-  };
-
-  // ---------------- Render ----------------
   return (
-    <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
-      <h1>ManifestMe Tasks</h1>
+    <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+      <h1>📋 ManifestMe Dashboard</h1>
+      <p>Connected to: <b>{apiBaseUrl}</b></p>
 
-      <div style={{ marginBottom: "1rem" }}>
-        <input
-          type="text"
-          value={newTaskTitle}
-          onChange={(e) => setNewTaskTitle(e.target.value)}
-          placeholder="New task title"
-        />
-        <button onClick={handleAddTask} style={{ marginLeft: "0.5rem" }}>
-          Add Task
-        </button>
-      </div>
+      <h2>Tasks</h2>
+      {tasks.length === 0 ? (
+        <p>No tasks found.</p>
+      ) : (
+        <ul>
+          {tasks.map((task) => (
+            <li key={task.id}>
+              <strong>{task.title}</strong> — {task.description}
+            </li>
+          ))}
+        </ul>
+      )}
 
-      <ul>
-        {tasks.map((task) => (
-          <li key={task.id} style={{ marginBottom: "0.5rem" }}>
-            <input
-              type="checkbox"
-              checked={task.completed}
-              onChange={() => handleToggleTask(task)}
-            />
-            <span style={{ marginLeft: "0.5rem" }}>{task.title}</span>
-            <button
-              onClick={() => handleDeleteTask(task.id)}
-              style={{ marginLeft: "1rem", color: "red" }}
-            >
-              Delete
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      <ToastContainer position="top-right" autoClose={3000} />
+      <ToastContainer position="bottom-right" />
     </div>
   );
 };
