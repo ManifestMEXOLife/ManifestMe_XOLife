@@ -1,0 +1,31 @@
+import { useEffect, useState } from 'react';
+import { loadAffirmations, getRandomAffirmation, getDailyAffirmation } from './utils/affirmations';
+
+function AffirmationWidget({ category, daily = false }) {
+  const [affirmation, setAffirmation] = useState(null);
+
+  useEffect(() => {
+    async function fetchAffirmation() {
+      const data = await loadAffirmations();
+      const selected = daily
+        ? getDailyAffirmation(data, new Date(), category)
+        : getRandomAffirmation(data, category);
+
+      setAffirmation(selected);
+    }
+
+    fetchAffirmation();
+  }, [category, daily]);
+
+  if (!affirmation) return <div>Loading affirmation...</div>;
+
+  return (
+    <div className="affirmation-card">
+      <h3>{affirmation.category}</h3>
+      <p>{affirmation.affirmation}</p>
+      <small>{affirmation.micro_prompt}</small>
+    </div>
+  );
+}
+
+export default AffirmationWidget;
