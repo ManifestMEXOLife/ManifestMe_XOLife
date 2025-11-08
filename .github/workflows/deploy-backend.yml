@@ -1,82 +1,107 @@
-deploy:
-  name: Deploy to Staging & Production
-  needs: build
-  runs-on: ubuntu-latest
+name: Deploy Backend
 
-  strategy:
-    matrix:
-      environment: [staging, production]
+on:
+  push:
+    branches:
+      - main
+      - develop
 
-  env:
-    STAGING_ENV: manifestme-staging
-    PRODUCTION_ENV: manifestme-env
+env:
+  NODE_VERSION: 20
+  AWS_REGION: us-east-1
+  EB_APP_NAME: manifestme-backend-app
+  STAGING_ENV: manifestme-staging
+  PRODUCTION_ENV: manifestme-prod
+  MAX_DEPLOY_RETRIES: 3
+  DEPLOY_SLEEP: 10
 
-  steps:
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: build-files
-        path: ./deploy
+jobs:
+  deploy:
+    name: Deploy to Staging & Production
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [staging, production]
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
+    steps:
+      # 1. Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      # 2. Download build artifacts
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: ./deploy
 
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      # 3. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install EB CLI
-      run: |
-        python -m pip install --upgrade pip
-        pip install --upgrade awsebcli
+      # 4. Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Determine EB_ENV_NAME
-      run: |
-        if [ "${{ matrix.environment }}" == "staging" ]; then
-          echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
-        else
-          echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
-        fi
-        echo "Deploying to $EB_ENV_NAME"
+      # 5. Configure AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Verify EB environment exists
-      run: |
-        if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
-          echo "❌ Elastic Beanstalk environment $EB_ENV_NAME does not exist!"
-          exit 1
-        fi
+      # 6. Install EB CLI
+      - name: Install EB CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade awsebcli
 
-    - name: Create deployment package
-      run: |
-        cd deploy
-        zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
-
-    - name: Deploy to Elastic Beanstalk (retry-enabled)
-      run: |
-        cd deploy
-        for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
-          echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
-          if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
-            eb setenv PORT=8080 || true
-            if eb deploy $EB_ENV_NAME --timeout 20; then
-              echo "✅ Deployment succeeded"
-              break
-            fi
+      # 7. Set EB environment
+      - name: Determine EB_ENV_NAME
+        run: |
+          if [ "${{ matrix.environment }}" == "staging" ]; then
+            echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
+          else
+            echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
           fi
-          echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
-          sleep ${{ env.DEPLOY_SLEEP }}
-          if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
-            echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
+          echo "Deploying to $EB_ENV_NAME"
+
+      # 8. Verify EB environment exists
+      - name: Verify EB environment
+        run: |
+          if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
+            echo "❌ EB environment $EB_ENV_NAME does not exist!"
             exit 1
           fi
-        done
+
+      # 9. Create deployment package
+      - name: Create deployment package
+        run: |
+          cd deploy
+          zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
+
+      # 10. Deploy to EB with retry logic
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          cd deploy
+          for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
+            echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
+            if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
+              eb setenv PORT=8080 || true
+              if eb deploy $EB_ENV_NAME --timeout 20; then
+                echo "✅ Deployment succeeded"
+                break
+              fi
+            fi
+            echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
+            sleep ${{ env.DEPLOY_SLEEP }}
+            if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
+              echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
+              exit 1
+            fi
+          done
