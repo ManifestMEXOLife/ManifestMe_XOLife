@@ -4,51 +4,63 @@ module.exports = {
   apps: [
     {
       name: 'manifestme-backend-dev',
-      script: './dist/server.js',        // compiled JS
-      watch: true,                       // auto-restart on changes
+      script: './dist/server.js',
       instances: 1,
       autorestart: true,
+      watch: false, // set true for hot reload in dev if needed
       max_memory_restart: '200M',
       env: {
         NODE_ENV: 'development',
         PORT: 8080,
+        LOG_DIR: path.join(__dirname, 'logs'),
       },
-      error_file: path.join(__dirname, 'logs', 'dev-error.log'),
-      out_file: path.join(__dirname, 'logs', 'dev-out.log'),
+      error_file: path.join(__dirname, 'logs', 'error-dev.log'),
+      out_file: path.join(__dirname, 'logs', 'out-dev.log'),
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
-      merge_logs: true,
     },
     {
       name: 'manifestme-backend-prod',
-      script: './dist/server.js',       // compiled JS
-      watch: false,                      // no watch in prod
-      instances: 1,                      // single instance for now
+      script: './dist/server.js',
+      instances: 1, // use 'max' for cluster mode if needed
       autorestart: true,
+      watch: false,
       max_memory_restart: '500M',
       env: {
         NODE_ENV: 'production',
-        PORT: process.env.PORT || 8080,
+        PORT: 8080,
+        LOG_DIR: path.join(__dirname, 'logs'),
       },
-      error_file: path.join(__dirname, 'logs', 'error.log'),
-      out_file: path.join(__dirname, 'logs', 'out.log'),
+      error_file: path.join(__dirname, 'logs', 'error-prod.log'),
+      out_file: path.join(__dirname, 'logs', 'out-prod.log'),
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
-      merge_logs: true,
     },
   ],
 
-  /**
-   * Optional: deploy section (if you ever use PM2 deploy)
-   */
   deploy: {
     production: {
-      user: 'node',
-      host: 'your-server-ip',
-      ref: 'origin/main',
-      repo: 'git@github.com:your-repo/ManifestMe_XOLife.git',
-      path: '/var/www/manifestme-backend',
+      user: 'ubuntu',               // SSH user
+      host: ['YOUR_SERVER_IP'],      // Replace with your server IP
+      ref: 'origin/main',            // Git branch to deploy
+      repo: 'git@github.com:YOUR_REPO.git', // Replace with your repo
+      path: '/home/ubuntu/backend',  // Remote path
       'pre-deploy-local': '',
-      'post-deploy': 'npm install && npm run build && pm2 reload ecosystem.config.js --only manifestme-backend-prod',
-      'pre-setup': '',
+      'post-deploy':
+        'npm ci && npm run build && pm2 reload ecosystem.config.js --only manifestme-backend-prod',
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
+    development: {
+      user: 'ubuntu',
+      host: ['YOUR_DEV_SERVER_IP'],
+      ref: 'origin/develop',
+      repo: 'git@github.com:YOUR_REPO.git',
+      path: '/home/ubuntu/backend',
+      'post-deploy':
+        'npm ci && npm run build && pm2 reload ecosystem.config.js --only manifestme-backend-dev',
+      env: {
+        NODE_ENV: 'development',
+      },
     },
   },
 };
