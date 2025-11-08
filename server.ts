@@ -1,11 +1,12 @@
 import express, { Request, Response, NextFunction } from 'express';
-import fs from 'fs';
-import path from 'path';
-import morgan from 'morgan';
-import compression from 'compression';
 import helmet from 'helmet';
+import compression from 'compression';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import morgan from 'morgan';
 import rfs from 'rotating-file-stream';
+import logger from './logger';
 
 dotenv.config();
 
@@ -22,26 +23,40 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
-// Rotating file stream for access logs (daily rotation)
+// Rotating file stream for access logs
 const accessLogStream = rfs.createStream('access.log', {
   interval: '1d',
   path: logsDir,
-  compress: 'gzip'
+  compress: 'gzip',
 });
 
 // Middleware
-app.use(helmet()); // security headers
-app.use(compression()); // gzip compression
+app.use(helmet()); // Security headers
+app.use(compression()); // Gzip compression
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Logging
-app.use(morgan('combined', { stream: accessLogStream })); // file logging
-if (ENV === 'development') app.use(morgan('dev')); // console logging
+// Morgan request logging to file and console
+app.use(morgan('combined', { stream: { write: (msg) => logger.info(msg.trim()) } }));
+if (ENV === 'development') {
+  app.use(morgan('dev'));
+}
 
-// Request logger middleware
+// Custom request logger middleware (enhanced)
 app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  const start = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+    logger.info(
+      '%s %s %d %sms',
+      req.method,
+      req.originalUrl,
+      res.statusCode,
+      durationMs.toFixed(2)
+    );
+  });
+
   next();
 });
 
@@ -52,32 +67,35 @@ app.get('/health', (req: Request, res: Response) => {
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
+  logger.info('Root endpoint accessed');
   res.send(`🚀 Server running in ${ENV} mode on ${HOST}:${PORT}`);
 });
 
-// Example API route to simulate error
-app.get('/api/test-error', (req: Request, res: Response) => {
-  throw new Error('Simulated server error');
+// Example error route
+app.get('/api/test-error', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    throw new Error('Simulated server error');
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Centralized error handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  const errorMessage = `[${new Date().toISOString()}] ❌ Error: ${err.stack || err.message}\n`;
-  console.error(errorMessage);
-  fs.appendFileSync(path.join(logsDir, 'error.log'), errorMessage);
+  logger.error('Error occurred: %s', err.stack || err.message);
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
 // Start server
 const server = app.listen(PORT, HOST, () => {
-  console.log(`✅ Server listening on http://${HOST}:${PORT} [${ENV}]`);
+  logger.info(`✅ Server listening on http://${HOST}:${PORT} [${ENV}]`);
 });
 
 // Graceful shutdown
 const shutdown = () => {
-  console.log('🛑 Shutdown signal received, closing server...');
+  logger.info('🛑 Shutdown signal received, closing server...');
   server.close(() => {
-    console.log('✅ Server closed gracefully');
+    logger.info('✅ Server closed gracefully');
     process.exit(0);
   });
 };
@@ -87,16 +105,12 @@ process.on('SIGINT', shutdown);
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  const msg = `[${new Date().toISOString()}] ❌ Uncaught Exception: ${err.stack}\n`;
-  console.error(msg);
-  fs.appendFileSync(path.join(logsDir, 'error.log'), msg);
+  logger.error('Uncaught Exception: %s', err.stack);
   process.exit(1);
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason) => {
-  const msg = `[${new Date().toISOString()}] ❌ Unhandled Rejection: ${reason}\n`;
-  console.error(msg);
-  fs.appendFileSync(path.join(logsDir, 'error.log'), msg);
+  logger.error('Unhandled Rejection: %s', reason);
   process.exit(1);
 });
