@@ -6,6 +6,14 @@ import rfs from 'rotating-file-stream';
 import path from 'path';
 import fs from 'fs';
 import logger, { requestLogger, errorLogger } from './logger';
+import logger, { requestLogger, errorLogger } from './logger';
+
+// Replace any console.log in middleware with logger.info or logger.error
+app.use(requestLogger);
+
+// Place errorLogger middleware before centralized error handler
+app.use(errorLogger);
+
 
 dotenv.config();
 
