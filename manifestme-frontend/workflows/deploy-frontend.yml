@@ -2,81 +2,59 @@ name: Deploy Frontend
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
-  S3_BUCKET_STAGING: manifestme-frontend-staging
-  S3_BUCKET_PROD: manifestme-frontend-prod
-  BUILD_DIR: build
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+  AWS_CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
 
 jobs:
   build-and-deploy:
-    name: Build and Deploy Frontend
+    name: Build & Deploy React Frontend
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        environment: [staging, production]
 
     steps:
-      # 1. Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      # 3. Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 4. Build frontend
+      - name: Lint code
+        run: npm run lint || echo "No lint script found"
+
+      - name: Run type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npm run test -- --passWithNoTests --coverage
+
       - name: Build React app
         run: npm run build
 
-      # 5. Configure AWS credentials
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # 6. Determine target S3 bucket
-      - name: Set S3 bucket
-        run: |
-          if [ "${{ matrix.environment }}" == "staging" ]; then
-            echo "S3_BUCKET=${{ env.S3_BUCKET_STAGING }}" >> $GITHUB_ENV
-          else
-            echo "S3_BUCKET=${{ env.S3_BUCKET_PROD }}" >> $GITHUB_ENV
-          fi
-          echo "Deploying to bucket: $S3_BUCKET"
-
-      # 7. Sync files to S3
-      - name: Sync files to S3
+      - name: Sync build to S3
         uses: jakejarvis/s3-sync-action@v0.5.1
         with:
-          args: --acl public-read --delete --exact-timestamps
-          source-dir: ${{ env.BUILD_DIR }}
-          dest-dir: /
+          args: --acl public-read --delete
         env:
-          AWS_S3_BUCKET: ${{ env.S3_BUCKET }}
+          AWS_S3_BUCKET: ${{ env.AWS_S3_BUCKET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          SOURCE_DIR: 'build'
 
-      # 8. Invalidate CloudFront (optional)
-      - name: Invalidate CloudFront cache
-        if: matrix.environment == 'production'
-        uses: chetan/invalidate-cloudfront-action@v2
-        with:
-          distribution-id: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-          paths: "/*"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Invalidate CloudFront (optional)
+        if: ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
