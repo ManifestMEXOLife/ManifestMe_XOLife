@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'manifestme-backend',
-      script: './server.ts',                      // exact path to your TS entry point
-      interpreter: './node_modules/.bin/ts-node', // use ts-node for TypeScript
-      watch: true,                                // auto-restart on changes
+      script: './server.ts',                      // root-level server.ts
+      interpreter: './node_modules/.bin/ts-node', // run TypeScript via ts-node
+      watch: true,                                // restart on changes
       ignore_watch: ['node_modules', 'dist', 'logs'],
       env: {
         NODE_ENV: 'development',
