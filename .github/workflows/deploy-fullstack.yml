@@ -1,126 +1,66 @@
-name: Fullstack CI/CD Pipeline
+name: Fullstack Deploy
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:
+    branches: [main, develop]
 
 env:
   NODE_VERSION: '22'
   AWS_REGION: 'us-east-1'
-  AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
-  AWS_CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
-  STAGING_ENV: manifestme-staging
-  PRODUCTION_ENV: manifestme-env
-  EB_APP_NAME: manifestme-backend
+  FRONTEND_BUILD_DIR: 'build'
+  BACKEND_DIST_DIR: 'dist'
   MAX_DEPLOY_RETRIES: 3
   DEPLOY_SLEEP: 10
+  EB_APP_NAME: 'manifestme-backend'
+  STAGING_ENV: 'manifestme-staging'
+  PRODUCTION_ENV: 'manifestme-prod'
 
 jobs:
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint backend and frontend
-        run: npm run lint || echo "No lint script found"
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Run tests
-        run: npm run test -- --passWithNoTests --coverage
-
-  build:
-    name: Build Backend & Frontend
-    runs-on: ubuntu-latest
-    needs: lint-and-test
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      # --- Backend build ---
-      - name: Build Backend
-        run: npm run build:backend || npx tsc
-
-      # Remove invalid artifact files
-      - name: Remove invalid backend files
-        run: |
-          find dist -type f \( -name '*:*' -o -name '*"*"*' -o -name '*<*' -o -name '*>*' -o -name '*|*' -o -name '*?*' \) -delete
-
-      - name: Upload backend artifacts
+          cache: npm
+      - run: npm ci
+      - run: npm run lint || echo "No lint script found"
+      - run: npx tsc --noEmit
+      - run: npm run test:cjs -- --passWithNoTests --coverage
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: backend-build
+          name: build-files
           path: |
             dist/**
-            prisma/
+            build/**
             package.json
             package-lock.json
           retention-days: 7
 
-      # --- Frontend build ---
-      - name: Build Frontend
-        run: npm run build:frontend
-
-      - name: Upload frontend artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: build
-          retention-days: 7
-
   deploy-backend:
-    name: Deploy Backend
+    name: Deploy Backend (Staging & Production)
+    needs: lint-and-test
     runs-on: ubuntu-latest
-    needs: build
     strategy:
       matrix:
         environment: [staging, production]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download backend build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: backend-build
+          name: build-files
           path: ./deploy
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -129,19 +69,26 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install EB CLI
+      - name: Setup Python & EB CLI
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade awsebcli
 
-      - name: Determine EB Environment Name
+      - name: Determine EB_ENV_NAME
         run: |
           if [ "${{ matrix.environment }}" == "staging" ]; then
             echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
           else
             echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
           fi
-          echo "Deploying backend to $EB_ENV_NAME"
+          echo "Deploying to $EB_ENV_NAME"
+
+      - name: Verify EB environment exists
+        run: |
+          if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
+            echo "❌ Elastic Beanstalk environment $EB_ENV_NAME does not exist!"
+            exit 1
+          fi
 
       - name: Create deployment package
         run: |
@@ -156,32 +103,43 @@ jobs:
             if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
               eb setenv PORT=8080 || true
               if eb deploy $EB_ENV_NAME --timeout 20; then
-                echo "✅ Backend deployment succeeded"
+                echo "✅ Deployment succeeded"
                 break
               fi
             fi
             echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
             sleep ${{ env.DEPLOY_SLEEP }}
             if [ $i -eq ${{ env.MAX_DEPLOY_RETRIES }} ]; then
-              echo "❌ Backend deployment failed after $MAX_DEPLOY_RETRIES attempts"
+              echo "❌ Deployment failed after $MAX_DEPLOY_RETRIES attempts"
               exit 1
             fi
           done
 
-  deploy-frontend:
-    name: Deploy Frontend
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download frontend build artifacts
-        uses: actions/download-artifact@v4
+      - name: PM2 Backend Process Management
+        uses: appleboy/ssh-action@v0.1.7
         with:
-          name: frontend-build
-          path: build
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            cd /home/ubuntu/backend
+            npm install pm2@latest -g
+            pm2 delete manifestme-backend || true
+            pm2 start dist/server.js --name manifestme-backend --env production
+            pm2 save
+            pm2 startup
+            echo "✅ PM2 backend process managed successfully"
+
+  deploy-frontend:
+    name: Deploy Frontend to S3
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: ./deploy
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -190,20 +148,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Sync frontend build to S3
+      - name: Sync files to S3
         uses: jakejarvis/s3-sync-action@v0.5.1
         with:
           args: --acl public-read --delete
         env:
-          AWS_S3_BUCKET: ${{ env.AWS_S3_BUCKET }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
-          SOURCE_DIR: 'build'
+          SOURCE_DIR: './deploy/build'
 
-      - name: Invalidate CloudFront (optional)
-        if: ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
+      - name: Invalidate CloudFront cache
+        uses: chetan/invalidate-cloudfront-action@v1
+        with:
+          distribution: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          paths: "/*"
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
