@@ -1,6 +1,5 @@
 name: Cleanup Old Artifacts
 
-# Trigger manually or on a schedule
 on:
   workflow_dispatch:
   schedule:
@@ -20,28 +19,40 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const { github, context } = require('@actions/github');
-            const perPage = 100;
-            let page = 1;
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - 30);
-            while (true) {
-              const artifacts = await github.rest.actions.listArtifactsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: perPage,
-                page
-              });
-              if (artifacts.data.artifacts.length === 0) break;
-              for (const artifact of artifacts.data.artifacts) {
-                if (new Date(artifact.created_at) < cutoff) {
-                  await github.rest.actions.deleteArtifact({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    artifact_id: artifact.id
-                  });
-                  console.log(`Deleted artifact: ${artifact.name}`);
+            try {
+              const perPage = 100;
+              let page = 1;
+              const cutoff = new Date();
+              cutoff.setDate(cutoff.getDate() - 30);
+
+              while (true) {
+                const artifacts = await github.rest.actions.listArtifactsForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: perPage,
+                  page
+                });
+
+                if (artifacts.data.artifacts.length === 0) break;
+
+                for (const artifact of artifacts.data.artifacts) {
+                  try {
+                    if (new Date(artifact.created_at) < cutoff) {
+                      await github.rest.actions.deleteArtifact({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        artifact_id: artifact.id
+                      });
+                      console.log(`Deleted artifact: ${artifact.name}`);
+                    }
+                  } catch (innerError) {
+                    console.error(`Failed to delete artifact ${artifact.name}:`, innerError);
+                  }
                 }
+                page++;
               }
-              page++;
+            } catch (error) {
+              console.error('Cleanup job failed:', error);
+              // Optionally fail the job
+              throw error;
             }
