@@ -2,18 +2,17 @@ name: Deploy Backend
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 env:
-  NODE_VERSION: 20
-  AWS_REGION: us-east-1
-  EB_APP_NAME: manifestme-backend-app
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-east-1'
+  EB_APP_NAME: manifestme-backend
   STAGING_ENV: manifestme-staging
-  PRODUCTION_ENV: manifestme-prod
+  PRODUCTION_ENV: manifestme-env
   MAX_DEPLOY_RETRIES: 3
-  DEPLOY_SLEEP: 10
+  DEPLOY_SLEEP: 15
 
 jobs:
   deploy:
@@ -24,30 +23,22 @@ jobs:
         environment: [staging, production]
 
     steps:
-      # 1. Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Download build artifacts
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-files
-          path: ./deploy
-
-      # 3. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # 4. Setup Python
-      - name: Setup Python
+      - name: Install Python & EB CLI
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+      - run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade awsebcli
 
-      # 5. Configure AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -55,13 +46,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 6. Install EB CLI
-      - name: Install EB CLI
-        run: |
-          python -m pip install --upgrade pip
-          pip install --upgrade awsebcli
-
-      # 7. Set EB environment
       - name: Determine EB_ENV_NAME
         run: |
           if [ "${{ matrix.environment }}" == "staging" ]; then
@@ -71,22 +55,25 @@ jobs:
           fi
           echo "Deploying to $EB_ENV_NAME"
 
-      # 8. Verify EB environment exists
-      - name: Verify EB environment
+      - name: Verify EB environment exists
         run: |
           if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
-            echo "❌ EB environment $EB_ENV_NAME does not exist!"
+            echo "❌ Elastic Beanstalk environment $EB_ENV_NAME does not exist!"
             exit 1
           fi
 
-      # 9. Create deployment package
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: ./deploy
+
       - name: Create deployment package
         run: |
           cd deploy
           zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
-      # 10. Deploy to EB with retry logic
-      - name: Deploy to Elastic Beanstalk
+      - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
           cd deploy
           for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
@@ -105,3 +92,19 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Restart backend with PM2 on EB instance
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EB_HOST }}
+          username: ${{ secrets.EB_USER }}
+          key: ${{ secrets.EB_SSH_KEY }}
+          script: |
+            cd /var/app/current
+            echo "🚀 Installing PM2 globally if not present..."
+            npm install -g pm2 || true
+            echo "🔁 Starting or restarting manifestme-backend..."
+            pm2 start dist/server.js --name manifestme-backend --update-env || pm2 restart manifestme-backend --update-env
+            pm2 save
+            pm2 startup systemd -u webapp --hp /home/webapp
+            echo "✅ PM2 process management complete"
