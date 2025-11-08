@@ -46,44 +46,71 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ----------------------------
+      # Determine EB environment
+      # ----------------------------
       - name: Determine EB_ENV_NAME
+        id: set-env
         run: |
           if [ "${{ matrix.environment }}" == "staging" ]; then
             echo "EB_ENV_NAME=${{ env.STAGING_ENV }}" >> $GITHUB_ENV
           else
             echo "EB_ENV_NAME=${{ env.PRODUCTION_ENV }}" >> $GITHUB_ENV
           fi
-          echo "Deploying to $EB_ENV_NAME"
+          echo "Deploying to ${{ matrix.environment }} ($EB_ENV_NAME)"
 
+      # ----------------------------
+      # Verify EB environment exists with retries
+      # ----------------------------
       - name: Verify EB environment exists
         run: |
-          if ! eb status $EB_ENV_NAME > /dev/null 2>&1; then
-            echo "❌ Elastic Beanstalk environment $EB_ENV_NAME does not exist!"
+          retries=3
+          count=0
+          until eb status $EB_ENV_NAME > /dev/null 2>&1 || [ $count -eq $retries ]; do
+            echo "⚠️ EB environment $EB_ENV_NAME not found, retrying in 10s..."
+            sleep 10
+            count=$((count + 1))
+          done
+          if [ $count -eq $retries ]; then
+            echo "❌ EB environment $EB_ENV_NAME still does not exist after $retries attempts."
             exit 1
           fi
+          echo "✅ EB environment $EB_ENV_NAME verified."
 
+      # ----------------------------
+      # Download build artifacts
+      # ----------------------------
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: build-files
           path: ./deploy
 
+      # ----------------------------
+      # Create deployment package
+      # ----------------------------
       - name: Create deployment package
         run: |
           cd deploy
           zip -r app.zip * -x "*.git*" "node_modules/*" "*.ts" "tsconfig.json" "**/*:*"
 
+      # ----------------------------
+      # Deploy to Elastic Beanstalk with retries
+      # ----------------------------
       - name: Deploy to Elastic Beanstalk (retry-enabled)
         run: |
           cd deploy
           for i in $(seq 1 ${{ env.MAX_DEPLOY_RETRIES }}); do
             echo "🚀 Deployment attempt $i to $EB_ENV_NAME..."
-            if eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"; then
-              eb setenv PORT=8080 || true
-              if eb deploy $EB_ENV_NAME --timeout 20; then
-                echo "✅ Deployment succeeded"
-                break
-              fi
+            set +e
+            eb init ${{ env.EB_APP_NAME }} --region ${{ env.AWS_REGION }} --platform "Node.js 22 running on 64bit Amazon Linux 2023"
+            eb setenv PORT=8080 || true
+            eb deploy $EB_ENV_NAME --timeout 20
+            status=$?
+            set -e
+            if [ $status -eq 0 ]; then
+              echo "✅ Deployment succeeded"
+              break
             fi
             echo "⚠️ Deployment failed, retrying in ${{ env.DEPLOY_SLEEP }} seconds..."
             sleep ${{ env.DEPLOY_SLEEP }}
@@ -93,13 +120,17 @@ jobs:
             fi
           done
 
-      - name: Restart backend with PM2 on EB instance
+      # ----------------------------
+      # Restart backend with PM2
+      # ----------------------------
+      - name: Restart backend with PM2
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EB_HOST }}
           username: ${{ secrets.EB_USER }}
           key: ${{ secrets.EB_SSH_KEY }}
           script: |
+            set -e
             cd /var/app/current
             echo "🚀 Installing PM2 globally if not present..."
             npm install -g pm2 || true
