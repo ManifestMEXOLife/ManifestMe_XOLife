@@ -1,42 +1,52 @@
 import { createLogger, format, transports } from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import expressWinston from 'express-winston';
+import path from 'path';
+import fs from 'fs';
 
-// Base logger
+// Ensure logs directory exists
+const logsDir = path.join(__dirname, 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+// Daily rotate transport for errors
+const errorRotateTransport = new DailyRotateFile({
+  filename: path.join(logsDir, 'error-%DATE%.log'),
+  datePattern: 'YYYY-MM-DD',
+  level: 'error',
+  zippedArchive: true,
+  maxSize: '20m',
+  maxFiles: '14d',
+});
+
+// Daily rotate transport for combined logs
+const combinedRotateTransport = new DailyRotateFile({
+  filename: path.join(logsDir, 'combined-%DATE%.log'),
+  datePattern: 'YYYY-MM-DD',
+  zippedArchive: true,
+  maxSize: '20m',
+  maxFiles: '14d',
+});
+
+// Create Winston logger
 const logger = createLogger({
   level: 'info', // default log level
   format: format.combine(
     format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    format.errors({ stack: true }), // include stack trace
+    format.errors({ stack: true }), // include stack traces
     format.splat(),
-    format.json()
+    format.json() // structured JSON logs
   ),
   defaultMeta: { service: 'manifestme-backend' },
-  transports: [
-    // Errors
-    new DailyRotateFile({
-      filename: 'logs/error-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      level: 'error',
-      maxFiles: '14d', // keep 14 days
-    }),
-    // Combined logs
-    new DailyRotateFile({
-      filename: 'logs/combined-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      maxFiles: '14d',
-    }),
-  ],
+  transports: [errorRotateTransport, combinedRotateTransport],
 });
 
-// Console output for development
+// Console output in non-production environments
 if (process.env.NODE_ENV !== 'production') {
   logger.add(
     new transports.Console({
-      format: format.combine(
-        format.colorize(),
-        format.simple()
-      ),
+      format: format.combine(format.colorize(), format.simple()),
     })
   );
 }
@@ -53,7 +63,7 @@ process.on('unhandledRejection', (reason) => {
 // Optional: Express middleware for logging requests/responses
 export const requestLogger = expressWinston.logger({
   winstonInstance: logger,
-  msg: "{{req.method}} {{req.url}} {{res.statusCode}} {{res.responseTime}}ms",
+  msg: '{{req.method}} {{req.url}} {{res.statusCode}} {{res.responseTime}}ms',
   expressFormat: true,
   colorize: process.env.NODE_ENV !== 'production',
   ignoreRoute: () => false,
