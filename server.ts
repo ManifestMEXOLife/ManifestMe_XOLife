@@ -23,7 +23,6 @@ if (!fs.existsSync(logsDir)) {
 }
 
 // Rotating file stream for access logs (daily rotation)
-// Requires "rotating-file-stream" package
 const accessLogStream = rfs.createStream('access.log', {
   interval: '1d',
   path: logsDir,
@@ -33,16 +32,16 @@ const accessLogStream = rfs.createStream('access.log', {
 // Attach morgan for access logging; write to rotating file
 app.use(morgan('combined', { stream: accessLogStream }));
 
-// Security and parsing middleware
+// Security + parsing middleware
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware from src/logger (express-winston)
+// Request logging middleware (from src/logger using express-winston)
 app.use(requestLogger);
 
-// Optional simple per-request log
+// Lightweight per-request info log (optional)
 app.use((req: Request, res: Response, next: NextFunction) => {
   logger.info('HTTP %s %s', req.method, req.originalUrl || req.url);
   next();
@@ -57,7 +56,7 @@ app.get('/', (_req: Request, res: Response) => {
   res.send(`🚀 Server running in ${ENV} mode`);
 });
 
-// Example async route demonstrating proper error forwarding
+// Example async route showing correct error forwarding
 app.get('/api/test-error', async (_req: Request, _res: Response, next: NextFunction) => {
   try {
     await Promise.reject(new Error('Simulated server error (async)'));
@@ -66,12 +65,12 @@ app.get('/api/test-error', async (_req: Request, _res: Response, next: NextFunct
   }
 });
 
-// Example sync route that throws
+// Example synchronous route that throws
 app.get('/api/test-error-sync', (_req: Request, _res: Response) => {
   throw new Error('Simulated server error (sync)');
 });
 
-// Error logger (express-winston) — should come before centralized error handler
+// Error logger (express-winston) — place before centralized handler
 app.use(errorLogger);
 
 // Centralized error handler
@@ -95,7 +94,7 @@ const shutdown = (signal?: string) => {
       process.exit(1);
     }
     logger.info('✅ Server closed gracefully');
-    // give logger transports a moment to flush
+    // allow logger transports a moment to flush
     setTimeout(() => process.exit(0), 100);
   });
 
@@ -112,5 +111,4 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 // Note: src/logger.ts already registers handlers for uncaughtException and unhandledRejection,
 // so we avoid registering duplicates here to prevent multiple process.exit calls.
 
-// Export app for testing
 export default app;
