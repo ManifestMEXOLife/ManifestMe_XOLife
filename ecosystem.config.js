@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       name: "manifestme-backend",
-      script: "./server.ts",
-      interpreter: "ts-node",
-      watch: true,
+      script: "./server.ts",    // relative to ManifestMe_XOLife
+      interpreter: "ts-node",   // use ts-node to run TypeScript
+      watch: true,              // optional: restart on changes
       env: {
         NODE_ENV: "development",
         PORT: 8080
