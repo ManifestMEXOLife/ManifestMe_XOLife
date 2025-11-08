@@ -1,85 +1,64 @@
-import { createLogger, format, transports } from 'winston';
-import 'winston-daily-rotate-file';
-import path from 'path';
-import fs from 'fs';
-import expressWinston from 'express-winston';
-
-// Ensure logs directory exists
-const logsDir = path.join(__dirname, 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.errorLogger = exports.requestLogger = void 0;
+const winston_1 = require("winston");
+require("winston-daily-rotate-file");
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const express_winston_1 = __importDefault(require("express-winston"));
+const logsDir = path_1.default.join(__dirname, 'logs');
+if (!fs_1.default.existsSync(logsDir)) {
+    fs_1.default.mkdirSync(logsDir, { recursive: true });
 }
-
-// Daily rotate transport for errors
-const errorRotateTransport = new transports.DailyRotateFile({
-  filename: path.join(logsDir, 'error-%DATE%.log'),
-  datePattern: 'YYYY-MM-DD',
-  level: 'error',
-  zippedArchive: true,
-  maxSize: '20m',
-  maxFiles: '14d', // keep logs for 14 days
+const errorRotateTransport = new winston_1.transports.DailyRotateFile({
+    filename: path_1.default.join(logsDir, 'error-%DATE%.log'),
+    datePattern: 'YYYY-MM-DD',
+    level: 'error',
+    zippedArchive: true,
+    maxSize: '20m',
+    maxFiles: '14d',
 });
-
-// Daily rotate transport for combined logs
-const combinedRotateTransport = new transports.DailyRotateFile({
-  filename: path.join(logsDir, 'combined-%DATE%.log'),
-  datePattern: 'YYYY-MM-DD',
-  zippedArchive: true,
-  maxSize: '20m',
-  maxFiles: '14d',
+const combinedRotateTransport = new winston_1.transports.DailyRotateFile({
+    filename: path_1.default.join(logsDir, 'combined-%DATE%.log'),
+    datePattern: 'YYYY-MM-DD',
+    zippedArchive: true,
+    maxSize: '20m',
+    maxFiles: '14d',
 });
-
-// Create Winston logger
-const logger = createLogger({
-  level: 'info',
-  format: format.combine(
-    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    format.errors({ stack: true }),
-    format.splat(),
-    format.json()
-  ),
-  defaultMeta: { service: 'manifestme-backend' },
-  transports: [
-    errorRotateTransport,
-    combinedRotateTransport,
-  ],
+const logger = (0, winston_1.createLogger)({
+    level: 'info',
+    format: winston_1.format.combine(winston_1.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), winston_1.format.errors({ stack: true }), winston_1.format.splat(), winston_1.format.json()),
+    defaultMeta: { service: 'manifestme-backend' },
+    transports: [
+        errorRotateTransport,
+        combinedRotateTransport,
+    ],
 });
-
-// Console output in non-production (colorized & readable)
 if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new transports.Console({
-      format: format.combine(
-        format.colorize(),
-        format.simple()
-      ),
-    })
-  );
+    logger.add(new winston_1.transports.Console({
+        format: winston_1.format.combine(winston_1.format.colorize(), winston_1.format.simple()),
+    }));
 }
-
-// Express middleware: request logging
-export const requestLogger = expressWinston.logger({
-  winstonInstance: logger,
-  msg: '{{req.method}} {{req.url}} {{res.statusCode}} {{res.responseTime}}ms',
-  expressFormat: true,
-  colorize: process.env.NODE_ENV !== 'production',
-  ignoreRoute: () => false,
+exports.requestLogger = express_winston_1.default.logger({
+    winstonInstance: logger,
+    msg: '{{req.method}} {{req.url}} {{res.statusCode}} {{res.responseTime}}ms',
+    expressFormat: true,
+    colorize: process.env.NODE_ENV !== 'production',
+    ignoreRoute: () => false,
 });
-
-// Express middleware: error logging
-export const errorLogger = expressWinston.errorLogger({
-  winstonInstance: logger,
+exports.errorLogger = express_winston_1.default.errorLogger({
+    winstonInstance: logger,
 });
-
-// Capture uncaught exceptions and unhandled rejections
 process.on('uncaughtException', (err) => {
-  logger.error('❌ Uncaught Exception: %s', err.stack || err);
-  process.exit(1);
+    logger.error('❌ Uncaught Exception: %s', err.stack || err);
+    process.exit(1);
 });
-
 process.on('unhandledRejection', (reason) => {
-  logger.error('❌ Unhandled Rejection: %s', reason);
-  process.exit(1);
+    logger.error('❌ Unhandled Rejection: %s', reason);
+    process.exit(1);
 });
-
-export default logger;
+exports.default = logger;
+//# sourceMappingURL=logger.js.map

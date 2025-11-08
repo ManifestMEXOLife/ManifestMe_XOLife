@@ -6,3 +6,9 @@
 
 # Ignore test coverage
 coverage/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
