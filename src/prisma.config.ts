@@ -1,19 +1,20 @@
-// prisma.config.ts
+// src/prisma.config.ts
 import { PrismaClient } from '@prisma/client';
 
-// Create a singleton Prisma client
-export const prisma = new PrismaClient({
-  adapter: process.env.DATABASE_URL, // Direct connection to your PostgreSQL
-  // If you want to use Prisma Accelerate in the future, you can do:
+// Use a singleton pattern in development to avoid multiple clients due to hot reload
+declare global {
+  // eslint-disable-next-line no-var
+  var prisma: PrismaClient | undefined;
+}
+
+const prisma = global.prisma || new PrismaClient({
+  adapter: process.env.DATABASE_URL, // Direct database connection
+  // If you want Prisma Accelerate in the future, you can use:
   // accelerateUrl: process.env.ACCELERATE_URL
 });
 
-// Optional: Graceful shutdown in Node.js
 if (process.env.NODE_ENV === 'development') {
-  // Avoid creating multiple clients in dev with hot-reload
-  if (!(global as any).prisma) {
-    (global as any).prisma = prisma;
-  }
+  global.prisma = prisma;
 }
 
 export default prisma;
