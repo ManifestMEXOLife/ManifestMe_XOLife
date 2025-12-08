@@ -37,14 +37,14 @@ jobs:
           npm run build
 
       # Step 5: Sync build files to S3
-      # Step 5: Sync build files to S3
       - name: Sync files to S3
-        uses: aws-actions/aws-s3-sync@v1   # Correct repository
+        uses: aws-actions/s3-sync@v1
         with:
           source: "build/"
           bucket: ${{ secrets.S3_BUCKET }}
           region: ${{ secrets.AWS_REGION }}
           delete: true
+
 
       # Step 6 (Optional): Invalidate CloudFront cache
       - name: Invalidate CloudFront
