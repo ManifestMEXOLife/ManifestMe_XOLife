@@ -1,6 +1,6 @@
 {
   "name": "manifestme-frontend",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "dependencies": {
     "@testing-library/dom": "^10.4.1",
@@ -41,5 +41,8 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "overrides": {
+    "glob": "10.5.0"
   }
 }
