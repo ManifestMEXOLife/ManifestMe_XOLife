@@ -30,7 +30,7 @@ jobs:
         uses: aws-actions/aws-s3-sync@v1   # auto-updates within v1
         with:
           source: "dist/"                  # your build/output folder
-          bucket: ${{ secrets.AWS_S3_BUCKET }}
+          bucket: ${{ secrets.S3_BUCKET }}
           region: "us-east-1"              # change as needed
           delete: true
           acl: "public-read"
