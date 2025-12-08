@@ -1,40 +1,53 @@
-name: Deploy React Frontend to S3
+name: Deploy to S3
 
+# Trigger workflow on push to main branch
 on:
   push:
     branches:
-      - main  # Trigger deployment on main branch
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4   # Always uses the latest v4 stable release
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # Step 2: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4  # Latest stable Node setup
         with:
-          node-version: 22
+          node-version: '18'        # Change to your desired Node version
+          cache: 'npm'
 
-      - name: Install dependencies
-        run: |
-          cd manifest-frontend
-          npm install
+      # Step 3: Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2  # Latest v2 stable
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Build frontend
+      # Step 4: Install dependencies and build
+      - name: Install dependencies and build
         run: |
-          cd manifest-frontend
+          npm ci
           npm run build
 
-      - name: Deploy to S3
-        uses: aws-actions/s3-sync@v2
+      # Step 5: Sync build files to S3
+      - name: Sync files to S3
+        uses: aws-actions/s3-sync@v1  # Latest v1 stable auto-updates
         with:
-          bucket: manifestme-frontend
-          region: us-east-1
-          source: manifest-frontend/build   # Use 'dist' if using Vite
+          source: "build/"
+          bucket: ${{ secrets.S3_BUCKET }}
+          region: ${{ secrets.AWS_REGION }}
           delete: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # Step 6 (Optional): Invalidate CloudFront cache
+      - name: Invalidate CloudFront
+        uses: chetan/invalidate-cloudfront-action@v1  # Latest v1 stable
+        with:
+          distribution: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          paths: "/*"
