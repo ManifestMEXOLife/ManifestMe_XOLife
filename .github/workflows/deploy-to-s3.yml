@@ -2,15 +2,19 @@ name: Deploy to S3
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: us-east-1
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. Checkout your repo
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
         
@@ -18,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           
       # 3. Install dependencies
@@ -29,19 +33,19 @@ jobs:
       - name: Build project
         run: npm run build
         
-      # 5. Configure AWS Credentials (Fixed: Added missing credentials setup)
+      # 5. Configure AWS Credentials (CRITICAL FIX)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
           
-      # 6. Sync with S3 (Fixed: Replaced broken aws-actions/aws-s3-sync with AWS CLI)
+      # 6. Sync to S3 (CRITICAL FIX - Using AWS CLI)
       - name: Sync to S3
         run: |
           aws s3 sync dist/ s3://${{ secrets.S3_BUCKET }} \
-            --region us-east-1 \
+            --region ${{ env.AWS_REGION }} \
             --delete \
             --acl public-read
             
@@ -51,7 +55,13 @@ jobs:
         with:
           distribution-id: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
           paths: "/*"
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # 8. Verify deployment
+      - name: Verify deployment
+        run: |
+          echo "✅ Deployment completed successfully!"
+          aws s3 ls s3://${{ secrets.S3_BUCKET }} --recursive --human-readable --summarize
