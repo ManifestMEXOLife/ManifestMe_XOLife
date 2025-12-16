@@ -1,55 +1,68 @@
 name: Deploy Frontend to S3
 
-# Trigger workflow on push to main branch
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: us-east-1
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout repository
+      # 1. Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
         
-      # Step 2: Set up Node.js (Fixed: Updated to latest v4)
-      - name: Set up Node.js
+      # 2. Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'  # Updated to latest LTS
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           
-      # Step 3: Configure AWS credentials (Fixed: Updated to latest v4)
-      - name: Configure AWS credentials
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+        
+      # 4. Build project
+      - name: Build project
+        run: npm run build
+        
+      # 5. Configure AWS Credentials (CRITICAL FIX)
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
           
-      # Step 4: Install dependencies and build
-      - name: Install dependencies and build
-        run: |
-          npm ci
-          npm run build
-          
-      # Step 5: Sync build files to S3 (Fixed: Replaced broken aws-actions/s3-sync with AWS CLI)
-      - name: Sync files to S3
+      # 6. Sync to S3 (CRITICAL FIX - Using AWS CLI)
+      - name: Sync build files to S3
         run: |
           aws s3 sync build/ s3://${{ secrets.S3_BUCKET }} \
-            --region ${{ secrets.AWS_REGION }} \
-            --delete
+            --region ${{ env.AWS_REGION }} \
+            --delete \
+            --acl public-read \
+            --cache-control "max-age=86400"
             
-      # Step 6 (Optional): Invalidate CloudFront cache
-      - name: Invalidate CloudFront
+      # 7. Invalidate CloudFront cache
+      - name: Invalidate CloudFront cache
         uses: chetan/invalidate-cloudfront-action@v1
         with:
           distribution-id: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
           paths: "/*"
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # 8. Verify deployment
+      - name: Verify deployment
+        run: |
+          echo "✅ Frontend deployed successfully!"
+          echo "🌐 Check your application at your CloudFront domain"
