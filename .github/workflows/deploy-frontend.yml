@@ -1,4 +1,4 @@
-name: Deploy to S3
+name: Deploy Frontend to S3
 
 # Trigger workflow on push to main branch
 on:
@@ -9,46 +9,47 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    
     steps:
       # Step 1: Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v4   # Always uses the latest v4 stable release
-
-      # Step 2: Set up Node.js
+        uses: actions/checkout@v4
+        
+      # Step 2: Set up Node.js (Fixed: Updated to latest v4)
       - name: Set up Node.js
-        uses: actions/setup-node@v4  # Latest stable Node setup
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'        # Change to your desired Node version
+          node-version: '22'  # Updated to latest LTS
           cache: 'npm'
-
-      # Step 3: Configure AWS credentials
+          
+      # Step 3: Configure AWS credentials (Fixed: Updated to latest v4)
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2  # Latest v2 stable
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-
+          
       # Step 4: Install dependencies and build
       - name: Install dependencies and build
         run: |
           npm ci
           npm run build
-
-      # Step 5: Sync build files to S3
+          
+      # Step 5: Sync build files to S3 (Fixed: Replaced broken aws-actions/s3-sync with AWS CLI)
       - name: Sync files to S3
-        uses: aws-actions/s3-sync@v1
-        with:
-          source: "build/"
-          bucket: ${{ secrets.S3_BUCKET }}
-          region: ${{ secrets.AWS_REGION }}
-          delete: true
-
-
+        run: |
+          aws s3 sync build/ s3://${{ secrets.S3_BUCKET }} \
+            --region ${{ secrets.AWS_REGION }} \
+            --delete
+            
       # Step 6 (Optional): Invalidate CloudFront cache
       - name: Invalidate CloudFront
-        uses: chetan/invalidate-cloudfront-action@v1  # Latest v1 stable
+        uses: chetan/invalidate-cloudfront-action@v1
         with:
-          distribution: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          distribution-id: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
           paths: "/*"
+          aws-region: ${{ secrets.AWS_REGION }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
