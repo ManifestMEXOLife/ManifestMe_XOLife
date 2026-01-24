@@ -1,20 +1,34 @@
-# Dependencies (The trailing slash ignores ALL node_modules folders recursively)
+# --- Dependencies ---
+# (No leading slash = ignores node_modules in root AND inside apps/)
 node_modules/
+.pnp
+.pnp.js
 
-# Build Outputs (Compiled code we don't want in Git)
+# --- Build Outputs ---
 dist/
 build/
 out/
+coverage/
 
-# Environment Variables & Secrets (NEVER commit these)
+# --- Logs ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# --- Environment & Secrets (CRITICAL) ---
 .env
 .env.local
-.DS_Store
+.env.development.local
+.env.test.local
+.env.production.local
+# (Keep .env.example if you have one, these rules won't block it)
 
-# Elastic Beanstalk Files
+# --- System Files ---
+.DS_Store
+Thumbs.db
+
+# --- Elastic Beanstalk ---
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
-
-# Ignore test coverage
-coverage/
