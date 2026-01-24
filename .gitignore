@@ -1,3 +1,15 @@
+# Dependencies (The trailing slash ignores ALL node_modules folders recursively)
+node_modules/
+
+# Build Outputs (Compiled code we don't want in Git)
+dist/
+build/
+out/
+
+# Environment Variables & Secrets (NEVER commit these)
+.env
+.env.local
+.DS_Store
 
 # Elastic Beanstalk Files
 .elasticbeanstalk/*
