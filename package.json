@@ -28,7 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.922.0",
     "@prisma/client": "^5.16.1",
-    "axios": "^1.7.9",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
